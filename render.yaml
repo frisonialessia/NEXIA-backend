@@ -1,0 +1,10 @@
+# Despliegue en Render (https://render.com) en 1 clic desde el repo.
+services:
+  - type: web
+    name: nexia-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NEXIA_CORS_ORIGINS
+        value: "*"
