@@ -20,10 +20,8 @@ CALIBRACION_TICKS = 6  # una máquina nueva aprende su baseline antes de alertar
 # almacenan y se exponen en el contrato, pero hoy NO alteran la detección. Son,
 # además, la base para KPIs futuros (OEE, eficiencia, energía → ver app/kpis.py).
 #
-# El motor acepta CUALQUIER magnitud numérica que mande el PLC (passthrough): el
-# único campo reservado es el pivote 'vib'. Este vocabulario NO filtra lo que
-# entra; solo aporta unidades/labels y nombres recomendados para las magnitudes
-# conocidas (y alimenta los KPIs). Añadir una conocida = una línea en METRICAS.
+# Añadir una magnitud nueva = una línea en METRICAS. Motor, adaptadores y KPIs
+# derivan todos de aquí (CLAVES_METRICAS / CLAVES_EXTRA), así no se toca nada más.
 METRICA_PIVOTE = "vib"
 
 METRICAS: dict[str, dict[str, str]] = {

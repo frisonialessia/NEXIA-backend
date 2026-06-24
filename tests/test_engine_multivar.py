@@ -7,15 +7,14 @@ def _maquina():
     return crear_maquina(SEED)  # calib=0 → evalúa de inmediato
 
 
-def test_ingest_almacena_metricas_passthrough():
+def test_ingest_almacena_metricas_filtradas():
     eng = FleetEngine()
     eng.crear(SEED)
-    eng.ingest("T-1", 2.1, None, {"temperatura": 55.0, "magnitud_rara": 99, "vib": 9.9, "texto": "n/a"})
+    eng.ingest("T-1", 2.1, None, {"temperatura": 55.0, "desconocida": 99, "vib": 9.9})
     m = eng._maquina("T-1")
     assert m.metricas["temperatura"] == 55.0
-    assert m.metricas["magnitud_rara"] == 99.0  # passthrough: cualquier numérica
-    assert "vib" not in m.metricas              # el pivote nunca va en metricas
-    assert "texto" not in m.metricas            # no numérica → descartada
+    assert "desconocida" not in m.metricas  # fuera del vocabulario canónico
+    assert "vib" not in m.metricas          # el pivote nunca va en metricas
 
 
 def test_metricas_no_numericas_se_descartan():

@@ -26,16 +26,15 @@ import asyncio
 import json
 import os
 
-from ...constants import METRICA_PIVOTE
+from ...constants import CLAVES_METRICAS, METRICA_PIVOTE
 from ..source import Lectura, Source
 
 # ── 🔌 MAPEO DE NODOS ───────────────────────────────────────────────────────
 # Qué nodo OPC UA corresponde a qué máquina y qué magnitud ('campo') mide.
 # Edítalo aquí, o pásalo por la variable de entorno OPCUA_NODES como JSON con
-# esta misma forma. 'campo' admite CUALQUIER magnitud (passthrough): 'vib' es el
-# PIVOTE de detección y el resto es telemetría multi-variable. Usa los nombres
-# del vocabulario canónico (app/constants.py: temperatura, presion, rpm,
-# corriente, voltaje, caudal) para que hereden unidad/label.
+# esta misma forma. 'campo' usa el vocabulario canónico (app/constants.py):
+# 'vib' es el PIVOTE de detección; el resto (temperatura, presion, rpm,
+# corriente, voltaje, caudal) son telemetría multi-variable.
 #
 # Por cada ciclo se leen TODOS los nodos, se AGRUPAN por máquina y se emite UNA
 # `Lectura` multi-variable por máquina (vib + el resto en `metricas`). Así un
@@ -117,6 +116,8 @@ class OpcUaSource(Source):
             valores: dict[str, float] = {}
             for n in nodos:
                 campo = n.get("campo", METRICA_PIVOTE)
+                if campo not in CLAVES_METRICAS:
+                    continue  # magnitud fuera del vocabulario → se ignora
                 try:
                     valor = await client.get_node(n["node"]).read_value()
                     valores[campo] = float(valor)

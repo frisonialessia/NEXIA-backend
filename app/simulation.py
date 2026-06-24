@@ -17,9 +17,9 @@ from typing import Optional
 from .constants import (
     AHORRO_POR_PARADA,
     CALIBRACION_TICKS,
+    CLAVES_EXTRA,
     FLOTA,
     MAX_EVENTOS,
-    METRICA_PIVOTE,
     TICKS_CALENTAMIENTO,
     UMBRAL_CRITICO,
     VENTANA_HIST,
@@ -33,17 +33,16 @@ def _ahora_ms() -> int:
 
 
 def _metricas_limpias(metricas: Optional[dict]) -> dict[str, float]:
-    """Normaliza un dict de magnitudes EXTRA: descarta el pivote 'vib' (viaja
-    aparte) y los valores no numéricos, y coacciona el resto a float. NO filtra
-    por vocabulario: acepta CUALQUIER magnitud numérica que mande el PLC
-    (passthrough). El vocabulario canónico (app/constants.py) solo aporta
-    unidades/labels para las magnitudes conocidas; no limita lo que entra."""
+    """Normaliza un dict de métricas EXTRA al vocabulario canónico: descarta el
+    pivote 'vib' (viaja aparte), las claves desconocidas y los valores no
+    numéricos, y coacciona el resto a float. Es la frontera de validación de la
+    telemetría multi-variable: el motor solo guarda magnitudes conocidas."""
     if not metricas:
         return {}
     limpio: dict[str, float] = {}
     for clave, valor in metricas.items():
-        if clave == METRICA_PIVOTE:
-            continue  # 'vib' nunca va en metricas (es el campo principal)
+        if clave not in CLAVES_EXTRA:
+            continue
         try:
             limpio[clave] = float(valor)
         except (TypeError, ValueError):

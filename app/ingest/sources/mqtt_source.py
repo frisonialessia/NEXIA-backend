@@ -23,10 +23,8 @@ import asyncio
 import json
 import os
 
+from ...constants import CLAVES_EXTRA
 from ..source import Lectura, Source
-
-# Claves del payload que NO son magnitudes extra (vibración, marca de tiempo, id).
-_CLAVES_NO_METRICA = {"rms_mm_s", "vib", "ts", "maquina_id"}
 
 
 class MqttSource(Source):
@@ -47,10 +45,10 @@ class MqttSource(Source):
             topic:   nexia/<maquina_id>/vibracion
             payload: {"rms_mm_s": 4.2, "temperatura": 71.5, "rpm": 1480, "ts": ...}
 
-        MULTI-VARIABLE: además de la vibración, CUALQUIER otra clave numérica del
-        payload (temperatura, presion, rpm, corriente…) se incluye como métrica
-        extra (passthrough). Usa los nombres del vocabulario canónico para que
-        hereden unidad/label. Si tu gateway usa otros nombres, mapéalos aquí.
+        MULTI-VARIABLE: además de la vibración, cualquier clave del payload que
+        pertenezca al vocabulario canónico (temperatura, presion, rpm, corriente,
+        voltaje, caudal) se incluye como métrica extra. Si tu gateway usa otros
+        nombres, mapéalos aquí a las claves canónicas.
         """
         try:
             data = json.loads(payload.decode("utf-8"))
@@ -65,15 +63,14 @@ class MqttSource(Source):
         if maquina_id == "" or vib is None:
             return None
 
-        # Magnitudes extra: todas las claves numéricas que no sean vib/ts/id.
+        # Magnitudes extra: solo las claves del vocabulario que vengan numéricas.
         metricas: dict[str, float] = {}
-        for clave, valor in data.items():
-            if clave in _CLAVES_NO_METRICA:
-                continue
-            try:
-                metricas[clave] = float(valor)
-            except (TypeError, ValueError):
-                continue
+        for clave in CLAVES_EXTRA:
+            if clave in data:
+                try:
+                    metricas[clave] = float(data[clave])
+                except (TypeError, ValueError):
+                    continue
 
         return Lectura(maquina_id=maquina_id, vib=float(vib), ts=data.get("ts"), metricas=metricas)
 

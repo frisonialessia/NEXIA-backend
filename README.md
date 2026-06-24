@@ -100,11 +100,9 @@ app/ingest/
 
 Una `Lectura` lleva la **vibración** (`vib`, el PIVOTE de detección) y, de forma
 **opcional**, otras magnitudes en `metricas` (`{clave: float}`): temperatura,
-presión, rpm, corriente… El motor acepta **cualquier magnitud numérica** que
-mande el PLC (passthrough); el único campo reservado es `vib`. El vocabulario
-canónico (`app/constants.py` → `METRICAS`) no limita lo que entra: solo aporta
-unidades/labels a las magnitudes conocidas y alimenta los KPIs (añadir una
-conocida = una línea).
+presión, rpm, corriente… El vocabulario canónico vive en un solo sitio,
+`app/constants.py` (`METRICAS`), y **añadir una magnitud es una línea**; motor,
+adaptadores y KPIs derivan de ahí.
 
 - **La detección no cambia.** La probabilidad de fallo y la FSM siguen pivotando
   solo sobre `vib`. Las demás magnitudes son **telemetría aditiva**: se almacenan
@@ -116,11 +114,10 @@ conocida = una línea).
   vacíos: el WebSocket emite **exactamente** el mismo payload que antes y por REST
   los campos llegan como `null` (el frontend los ignora hasta querer graficarlos).
   `vib`/`exp`/`v` siguen siendo el eje. Quedan documentados en `/docs`.
-- **Adaptadores:** el CSV lee como métrica cualquier columna extra numérica
-  (`sample_readings_multi.csv`); el MQTT toma cualquier clave numérica del payload
-  (salvo `vib`/`ts`/`id`); el OPC UA **agrupa los nodos por máquina** y emite
-  **una** `Lectura` multi-variable por máquina y ciclo (`vib` + el resto en
-  `metricas`).
+- **Adaptadores:** el CSV lee como métrica cualquier columna extra del vocabulario
+  (`sample_readings_multi.csv`); el MQTT toma las claves extra del payload JSON; el
+  OPC UA **agrupa los nodos por máquina** y emite **una** `Lectura` multi-variable
+  por máquina y ciclo (`vib` + el resto en `metricas`).
 - **Demo en vivo:** `NEXIA_SIM_MULTIVAR=1` hace que el simulador genere magnitudes
   plausibles (apagado por defecto, para no tocar el payload en vivo).
 

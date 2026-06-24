@@ -13,14 +13,11 @@ def test_solo_vib():
     assert l.metricas == {}
 
 
-def test_vib_mas_extra_passthrough():
-    payload = b'{"rms_mm_s": 4.2, "temperatura": 71.5, "rpm": 1480, "magnitud_rara": 9, "ts": 123}'
+def test_vib_mas_extra():
+    payload = b'{"rms_mm_s": 4.2, "temperatura": 71.5, "rpm": 1480, "desconocida": 9}'
     l = _src()._normalizar("nexia/Bomba/vibracion", payload)
     assert l.vib == 4.2
-    # passthrough de cualquier clave numérica que no sea vib/ts/id:
-    assert l.metricas == {"temperatura": 71.5, "rpm": 1480.0, "magnitud_rara": 9.0}
-    assert "ts" not in l.metricas and "rms_mm_s" not in l.metricas
-    assert l.ts == 123
+    assert l.metricas == {"temperatura": 71.5, "rpm": 1480.0}
 
 
 def test_maquina_id_desde_topic():

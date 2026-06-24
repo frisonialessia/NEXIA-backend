@@ -45,11 +45,11 @@ class Lectura:
 
     metricas: dict[str, float] = field(default_factory=dict)
     """Magnitudes EXTRA además de la vibración (temperatura, presión, rpm,
-    corriente…), como {clave: float}. NUNCA incluye 'vib' (esa viaja en el campo
-    `vib`). Vacío = la fuente solo aporta vibración, por lo que el comportamiento
-    es idéntico al de antes de multi-variable. El motor acepta cualquier magnitud
-    numérica (passthrough); usa los nombres del vocabulario de app/constants.py
-    cuando existan (así heredan unidad/label y alimentan los KPIs)."""
+    corriente…), normalizadas a {clave_canónica: float}. NUNCA incluye 'vib'
+    (esa viaja en el campo `vib`). Vacío = la fuente solo aporta vibración, por
+    lo que el comportamiento es idéntico al de antes de multi-variable. Las
+    claves deben pertenecer al vocabulario de app/constants.py (CLAVES_EXTRA);
+    el motor filtra lo desconocido, pero el Source debería mapearlas bien."""
 
     def valores(self) -> dict[str, float]:
         """Todas las magnitudes juntas, incluido el pivote:

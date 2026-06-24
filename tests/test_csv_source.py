@@ -24,15 +24,14 @@ def test_csv_multivar_lee_metricas():
     assert "vib" not in primera.metricas  # el pivote viaja en el campo vib
 
 
-def test_csv_columna_extra_passthrough(tmp_path):
+def test_csv_columna_desconocida_se_ignora(tmp_path):
     p = tmp_path / "r.csv"
     p.write_text(
-        "maquina_id,vib,ts,temperatura,magnitud_rara\nM1,2.0,,50.0,99\n",
+        "maquina_id,vib,ts,temperatura,desconocida\nM1,2.0,,50.0,99\n",
         encoding="utf-8",
     )
     filas = CsvReplaySource(str(p))._leer_filas()
-    # Cualquier columna extra numérica entra (passthrough), conocida o no.
-    assert filas[0].metricas == {"temperatura": 50.0, "magnitud_rara": 99.0}
+    assert filas[0].metricas == {"temperatura": 50.0}
 
 
 def test_csv_celda_no_numerica_se_descarta(tmp_path):

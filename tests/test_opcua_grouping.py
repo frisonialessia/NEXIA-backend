@@ -88,13 +88,12 @@ def test_nodo_ilegible_se_omite_solo_esa_magnitud(monkeypatch):
     assert cap[0].metricas == {}  # temp ilegible se cae, la máquina igual emite
 
 
-def test_campo_passthrough(monkeypatch):
+def test_campo_fuera_de_vocabulario_se_ignora(monkeypatch):
     nodos = [
         {"node": "v", "maquina": "A", "campo": "vib"},
-        {"node": "x", "maquina": "A", "campo": "magnitud_rara"},
+        {"node": "x", "maquina": "A", "campo": "inventada"},
     ]
     src = _src(monkeypatch, nodos)
     cap = _correr(src, _FakeClient({"v": 4.0, "x": 99.0}))
     assert len(cap) == 1
-    # passthrough: cualquier 'campo' configurado entra como métrica.
-    assert cap[0].metricas == {"magnitud_rara": 99.0}
+    assert cap[0].metricas == {}
