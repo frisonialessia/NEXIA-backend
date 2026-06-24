@@ -7,6 +7,7 @@
 # ──────────────────────────────────────────────────────────────────────────
 
 import math
+import os
 import random
 import time
 from dataclasses import dataclass, field
@@ -16,6 +17,7 @@ from typing import Optional
 from .constants import (
     AHORRO_POR_PARADA,
     CALIBRACION_TICKS,
+    CLAVES_EXTRA,
     FLOTA,
     MAX_EVENTOS,
     TICKS_CALENTAMIENTO,
@@ -30,6 +32,24 @@ def _ahora_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _metricas_limpias(metricas: Optional[dict]) -> dict[str, float]:
+    """Normaliza un dict de métricas EXTRA al vocabulario canónico: descarta el
+    pivote 'vib' (viaja aparte), las claves desconocidas y los valores no
+    numéricos, y coacciona el resto a float. Es la frontera de validación de la
+    telemetría multi-variable: el motor solo guarda magnitudes conocidas."""
+    if not metricas:
+        return {}
+    limpio: dict[str, float] = {}
+    for clave, valor in metricas.items():
+        if clave not in CLAVES_EXTRA:
+            continue
+        try:
+            limpio[clave] = float(valor)
+        except (TypeError, ValueError):
+            continue
+    return limpio
+
+
 @dataclass
 class Maquina:
     id: str
@@ -42,16 +62,17 @@ class Maquina:
     estado: str = "STABLE"
     c_sube: int = 0
     c_baja: int = 0
-    hist: list = field(default_factory=list)  # [{"t","v","exp"}]
+    hist: list = field(default_factory=list)  # [{"t","v","exp"[, "m": {...}]}]
     expected: float = 0.0
     prob: float = 0.05
     tick: int = 0
     ritmo_dia: float = 0.0
     horas_op: float = 0.0
     calib: int = 0
+    metricas: dict = field(default_factory=dict)  # último valor por magnitud extra
 
     def to_dto(self) -> dict:
-        return {
+        dto = {
             "id": self.id,
             "sensor": self.sensor,
             "sector": self.sector,
@@ -67,6 +88,12 @@ class Maquina:
             "esc": self.esc,
             "calib": self.calib,
         }
+        # ADITIVO: solo se incluye `metricas` cuando la máquina tiene magnitudes
+        # extra. En modo simulado por defecto queda fuera → payload idéntico al
+        # de antes de multi-variable (el frontend no nota diferencia).
+        if self.metricas:
+            dto["metricas"] = dict(self.metricas)
+        return dto
 
 
 def crear_maquina(seed: dict) -> Maquina:
@@ -108,12 +135,32 @@ def _vibracion_simulada(m: Maquina) -> float:
     return m.expected + 4 + random.random() * 2  # critico
 
 
-def _evaluar(m: Maquina, v: float, now_ms: int) -> Optional[dict]:
-    """EL MOTOR. Dada una lectura de vibración `v` (venga de donde venga),
-    aplica calibración, probabilidad de fallo y la FSM, y devuelve una alerta si
-    la máquina acaba de entrar en crítico. NO sabe si el dato es real o simulado:
-    esta es la frontera entre la fuente de datos y la lógica de cómputo."""
+def _evaluar(m: Maquina, v: float, now_ms: int, metricas: Optional[dict] = None) -> Optional[dict]:
+    """EL MOTOR. Dada una lectura de vibración `v` (venga de donde venga) y, de
+    forma OPCIONAL, otras magnitudes (`metricas`: temperatura, presión, rpm,
+    corriente…), aplica calibración, probabilidad de fallo y la FSM, y devuelve
+    una alerta si la máquina acaba de entrar en crítico.
+
+    La detección PIVOTA solo sobre `v`: las magnitudes extra son telemetría
+    ADITIVA (se almacenan y se exponen, pero no cambian la FSM ni la
+    probabilidad). NO sabe si el dato es real o simulado: esta es la frontera
+    entre la fuente de datos y la lógica de cómputo."""
     v = max(0.0, round(v, 3))
+
+    # Telemetría multi-variable: fusiona (carry-forward) las magnitudes extra
+    # conocidas en el estado de la máquina. No interviene en la detección; solo
+    # enriquece el estado y cada punto del historial.
+    extra = _metricas_limpias(metricas)
+    if extra:
+        m.metricas.update(extra)
+
+    def _punto() -> dict:
+        # Punto de historial. Conserva exactamente {"t","v","exp"} (lo que el
+        # frontend ya consume) y añade "m" SOLO si hay magnitudes extra.
+        p = {"t": now_ms, "v": v, "exp": m.expected}
+        if m.metricas:
+            p["m"] = dict(m.metricas)
+        return p
 
     # ── Calibración: aprendiendo baseline (sin juzgar, sin alertas) ──────────
     if m.calib > 0:
@@ -122,7 +169,7 @@ def _evaluar(m: Maquina, v: float, now_ms: int) -> Optional[dict]:
         m.estado = "STABLE"
         m.c_sube = 0
         m.c_baja = 0
-        m.hist.append({"t": now_ms, "v": v, "exp": m.expected})
+        m.hist.append(_punto())
         if len(m.hist) > VENTANA_HIST:
             m.hist.pop(0)
         return None
@@ -146,26 +193,54 @@ def _evaluar(m: Maquina, v: float, now_ms: int) -> Optional[dict]:
             "exp": m.expected,
             "umbral": m.umbral,
         }
+        if m.metricas:
+            alerta["metricas"] = dict(m.metricas)
 
-    m.hist.append({"t": now_ms, "v": v, "exp": m.expected})
+    m.hist.append(_punto())
     if len(m.hist) > VENTANA_HIST:
         m.hist.pop(0)
 
     return alerta
 
 
+def _sim_multivar_activo() -> bool:
+    """¿El simulador debe generar magnitudes extra de DEMO? Opt-in por entorno
+    (NEXIA_SIM_MULTIVAR=1). Apagado por defecto → el modo simulado emite solo
+    vibración y el payload en vivo es idéntico al de antes de multi-variable."""
+    return os.getenv("NEXIA_SIM_MULTIVAR", "").strip().lower() in ("1", "true", "yes", "on", "si")
+
+
+def _metricas_simuladas(m: Maquina, v: float) -> dict[str, float]:
+    """Magnitudes extra de DEMO, plausibles y correladas con la vibración, para
+    que el frontend vea multi-variable EN VIVO sin hardware. Solo se usan en
+    simulación cuando NEXIA_SIM_MULTIVAR está activo; en ingesta real las
+    magnitudes llegan del PLC y esta función no se usa."""
+    desv = max(0.0, v - m.expected)  # cuánto se desvía de lo esperado
+    return {
+        "temperatura": round(45 + desv * 3 + (random.random() - 0.5) * 2, 1),
+        "presion": round(4.0 + (random.random() - 0.5) * 0.3, 2),
+        "rpm": float(round(1480 - desv * 20 + (random.random() - 0.5) * 10)),
+        "corriente": round(12 + desv * 0.8 + (random.random() - 0.5) * 0.5, 2),
+    }
+
+
 def tick_maquina(m: Maquina) -> Optional[dict]:
     """Un paso de SIMULACIÓN: avanza el baseline, genera la vibración simulada y
     la evalúa. Devuelve una alerta si acaba de entrar en crítico."""
     _avanzar_baseline(m)
-    return _evaluar(m, _vibracion_simulada(m), _ahora_ms())
+    v = _vibracion_simulada(m)
+    metricas = _metricas_simuladas(m, v) if _sim_multivar_activo() else None
+    return _evaluar(m, v, _ahora_ms(), metricas)
 
 
-def procesar_lectura(m: Maquina, vib: float, ts: Optional[int] = None) -> Optional[dict]:
-    """Procesa una lectura REAL ya normalizada (vib en mm/s) que entra por el
-    módulo de ingesta. Mismo motor que la simulación, distinta fuente."""
+def procesar_lectura(
+    m: Maquina, vib: float, ts: Optional[int] = None, metricas: Optional[dict] = None
+) -> Optional[dict]:
+    """Procesa una lectura REAL ya normalizada (vib en mm/s, más magnitudes extra
+    opcionales en `metricas`) que entra por el módulo de ingesta. Mismo motor que
+    la simulación, distinta fuente."""
     _avanzar_baseline(m)
-    return _evaluar(m, float(vib), ts or _ahora_ms())
+    return _evaluar(m, float(vib), ts or _ahora_ms(), metricas)
 
 
 def _evento_deteccion(a: dict) -> dict:
@@ -234,18 +309,25 @@ class FleetEngine:
         return update
 
     # ── Ingesta de datos REALES ───────────────────────────────────────────────
-    def ingest(self, maquina_id: str, vib: float, ts: Optional[int] = None) -> Optional[dict]:
+    def ingest(
+        self,
+        maquina_id: str,
+        vib: float,
+        ts: Optional[int] = None,
+        metricas: Optional[dict] = None,
+    ) -> Optional[dict]:
         """Punto de entrada para una lectura real (la llama el módulo de ingesta,
-        ver app/ingest/). Procesa la lectura con el MISMO motor que la simulación
-        y devuelve el parche 'update' para el WebSocket, o None si la máquina no
-        existe. El motor no sabe de qué fuente vino el dato."""
+        ver app/ingest/). Procesa la lectura —vibración + magnitudes extra
+        opcionales (`metricas`)— con el MISMO motor que la simulación y devuelve
+        el parche 'update' para el WebSocket, o None si la máquina no existe. El
+        motor no sabe de qué fuente vino el dato."""
         m = self._maquina(maquina_id)
         if m is None:
             # Máquina desconocida. Para auto-registrar activos al vuelo, aquí se
             # podría crear con crear_maquina({...}); de momento se ignora.
             return None
 
-        alerta = procesar_lectura(m, vib, ts)
+        alerta = procesar_lectura(m, vib, ts, metricas)
         if alerta:
             self.alertas = [alerta] + self.alertas
             self.historial = [_a_historial(alerta)] + self.historial

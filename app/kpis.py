@@ -1,0 +1,74 @@
+# ──────────────────────────────────────────────────────────────────────────
+# KPIs DERIVADOS  ·  energía, eficiencia, OEE
+# ──────────────────────────────────────────────────────────────────────────
+# Funciones PURAS que derivan indicadores a partir de las magnitudes que ya
+# trae una máquina multi-variable (ver Lectura.valores() / Maquina.metricas).
+#
+# ESTADO: deja "listo el camino". Hoy NO se exponen en el contrato (el frontend
+# no cambia). `desde_valores()` devuelve un dict camelCase pensado para poblar,
+# el día de mañana, un futuro MaquinaDTO.kpis SIN acoplar el motor a los KPIs:
+# el motor sigue calculando solo la FSM de vibración; esto es una capa aparte.
+# ──────────────────────────────────────────────────────────────────────────
+
+from __future__ import annotations
+
+import math
+from typing import Optional
+
+# Voltaje de línea por defecto (V) si el PLC no reporta 'voltaje'.
+VOLTAJE_NOMINAL = 400.0
+# Factor de potencia típico de un motor industrial cuando no se conoce.
+FACTOR_POTENCIA = 0.85
+
+
+def energia_kw(
+    corriente: Optional[float],
+    voltaje: Optional[float] = VOLTAJE_NOMINAL,
+    fp: float = FACTOR_POTENCIA,
+    trifasico: bool = True,
+) -> Optional[float]:
+    """Potencia activa estimada (kW) a partir de corriente (A) y voltaje (V).
+    Trifásico: P = √3 · V · I · fp. Monofásico: P = V · I · fp.
+    Devuelve None si falta o es inválido alguno de los datos."""
+    if not corriente or not voltaje or corriente <= 0 or voltaje <= 0:
+        return None
+    factor = math.sqrt(3) if trifasico else 1.0
+    return round(factor * voltaje * corriente * fp / 1000.0, 3)
+
+
+def eficiencia(salida: Optional[float], entrada: Optional[float]) -> Optional[float]:
+    """Eficiencia salida/entrada en % (acotada a 0..100). None si la entrada es
+    inválida (evita división por cero)."""
+    if not entrada or entrada <= 0 or salida is None:
+        return None
+    return round(max(0.0, min(1.0, salida / entrada)) * 100, 1)
+
+
+def oee(
+    disponibilidad: Optional[float],
+    rendimiento: Optional[float],
+    calidad: Optional[float],
+) -> Optional[float]:
+    """OEE = Disponibilidad × Rendimiento × Calidad, en %. Cada factor es un
+    ratio 0..1 (se acota). None si falta alguno."""
+    factores = (disponibilidad, rendimiento, calidad)
+    if any(f is None for f in factores):
+        return None
+    producto = 1.0
+    for f in factores:
+        producto *= max(0.0, min(1.0, f))
+    return round(producto * 100, 1)
+
+
+def desde_valores(valores: dict[str, float]) -> dict[str, float]:
+    """Calcula los KPIs DERIVABLES con las magnitudes presentes en `valores`
+    (p. ej. {'vib','temperatura','corriente','voltaje'}). Solo incluye los que
+    se pueden calcular con los datos disponibles — no inventa nada.
+
+    Pensado para alimentar un futuro MaquinaDTO.kpis (claves camelCase). Hoy
+    nadie lo llama desde el motor; es el punto de extensión para OEE/energía."""
+    kpis: dict[str, float] = {}
+    e = energia_kw(valores.get("corriente"), valores.get("voltaje", VOLTAJE_NOMINAL))
+    if e is not None:
+        kpis["energiaKw"] = e
+    return kpis

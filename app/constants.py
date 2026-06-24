@@ -13,6 +13,43 @@ AHORRO_POR_PARADA = COSTO_HORA_PARADA * HORAS_PARADA_TIPICA  # 12000
 UMBRAL_CRITICO = 6.5
 CALIBRACION_TICKS = 6  # una máquina nueva aprende su baseline antes de alertar
 
+# ── Métricas multi-variable ──────────────────────────────────────────────────
+# Vocabulario CANÓNICO de magnitudes que puede transportar una Lectura. 'vib'
+# (vibración) es el PIVOTE: la magnitud sobre la que el motor calcula la
+# probabilidad de fallo y corre la FSM. El resto son telemetría ADITIVA: se
+# almacenan y se exponen en el contrato, pero hoy NO alteran la detección. Son,
+# además, la base para KPIs futuros (OEE, eficiencia, energía → ver app/kpis.py).
+#
+# Añadir una magnitud nueva = una línea en METRICAS. Motor, adaptadores y KPIs
+# derivan todos de aquí (CLAVES_METRICAS / CLAVES_EXTRA), así no se toca nada más.
+METRICA_PIVOTE = "vib"
+
+METRICAS: dict[str, dict[str, str]] = {
+    "vib":         {"unidad": "mm/s", "label": "Vibración"},
+    "temperatura": {"unidad": "°C",   "label": "Temperatura"},
+    "presion":     {"unidad": "bar",  "label": "Presión"},
+    "rpm":         {"unidad": "rpm",  "label": "Velocidad"},
+    "corriente":   {"unidad": "A",    "label": "Corriente"},
+    "voltaje":     {"unidad": "V",    "label": "Voltaje"},
+    "caudal":      {"unidad": "m³/h", "label": "Caudal"},
+}
+
+# Todas las claves válidas, y las EXTRA (todo menos el pivote, que viaja aparte).
+CLAVES_METRICAS = set(METRICAS)
+CLAVES_EXTRA = CLAVES_METRICAS - {METRICA_PIVOTE}
+
+
+def es_metrica_valida(clave: str) -> bool:
+    """True si `clave` pertenece al vocabulario canónico de métricas."""
+    return clave in CLAVES_METRICAS
+
+
+def unidad(clave: str) -> str:
+    """Unidad de una métrica (cadena vacía si no está en el vocabulario)."""
+    m = METRICAS.get(clave)
+    return m["unidad"] if m else ""
+
+
 # ── Motor / simulación ──────────────────────────────────────────────────────
 TICKS_CALENTAMIENTO = 8
 INTERVALO_S = 2.0

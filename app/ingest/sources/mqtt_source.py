@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 
+from ...constants import CLAVES_EXTRA
 from ..source import Lectura, Source
 
 
@@ -42,7 +43,12 @@ class MqttSource(Source):
         """🔌 MAPEO DE CAMPOS — traduce el mensaje del gateway a `Lectura`.
         Ajusta esto al formato EXACTO que publique tu gateway. Ejemplo asumido:
             topic:   nexia/<maquina_id>/vibracion
-            payload: {"rms_mm_s": 4.2, "ts": 1719190000000}
+            payload: {"rms_mm_s": 4.2, "temperatura": 71.5, "rpm": 1480, "ts": ...}
+
+        MULTI-VARIABLE: además de la vibración, cualquier clave del payload que
+        pertenezca al vocabulario canónico (temperatura, presion, rpm, corriente,
+        voltaje, caudal) se incluye como métrica extra. Si tu gateway usa otros
+        nombres, mapéalos aquí a las claves canónicas.
         """
         try:
             data = json.loads(payload.decode("utf-8"))
@@ -57,7 +63,16 @@ class MqttSource(Source):
         if maquina_id == "" or vib is None:
             return None
 
-        return Lectura(maquina_id=maquina_id, vib=float(vib), ts=data.get("ts"))
+        # Magnitudes extra: solo las claves del vocabulario que vengan numéricas.
+        metricas: dict[str, float] = {}
+        for clave in CLAVES_EXTRA:
+            if clave in data:
+                try:
+                    metricas[clave] = float(data[clave])
+                except (TypeError, ValueError):
+                    continue
+
+        return Lectura(maquina_id=maquina_id, vib=float(vib), ts=data.get("ts"), metricas=metricas)
 
     async def run(self) -> None:
         # Import perezoso: el repo corre sin paho-mqtt instalado.

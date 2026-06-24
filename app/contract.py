@@ -40,10 +40,16 @@ class MaquinaPatchDTO(BaseModel):
 
 
 # ── Modelos de salida (solo para documentación en /docs) ────────────────────
+# NOTA multi-variable: los campos `metricas` / `m` son ADITIVOS y OPCIONALES.
+# Solo aparecen con valor cuando la fuente aporta magnitudes extra (temperatura,
+# presión, rpm, corriente…). En modo simulado por defecto van vacíos, así que el
+# contrato que ya consume el frontend no cambia: `vib`/`exp`/`v` siguen siendo el
+# eje. El frontend puede ignorarlos hasta que quiera graficarlos.
 class LecturaDTO(BaseModel):
     t: int
     v: float
     exp: float
+    m: Optional[dict[str, float]] = None  # magnitudes extra en ese instante
 
 
 class MaquinaDTO(BaseModel):
@@ -61,6 +67,7 @@ class MaquinaDTO(BaseModel):
     hist: list[LecturaDTO]
     esc: Optional[Escenario] = None
     calib: Optional[int] = None
+    metricas: Optional[dict[str, float]] = None  # último valor por magnitud extra
 
 
 class AlertaDTO(BaseModel):
@@ -75,6 +82,7 @@ class AlertaDTO(BaseModel):
     exp: float
     umbral: float
     estado: Optional[Literal["Pendiente", "Resuelto"]] = None
+    metricas: Optional[dict[str, float]] = None  # magnitudes extra al detectar
 
 
 class EventoDTO(BaseModel):

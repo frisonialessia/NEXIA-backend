@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
 
 
@@ -36,11 +36,25 @@ class Lectura:
     en el Source concreto (ver el mapeo de campos en cada adaptador)."""
 
     vib: float
-    """Vibración RMS en mm/s (la magnitud que consume el motor). Si tu sensor
-    entrega otra unidad/escala, conviértela en el Source ANTES de emitir."""
+    """Vibración RMS en mm/s. Es el PIVOTE: la magnitud sobre la que el motor
+    calcula la probabilidad de fallo. Si tu sensor entrega otra unidad/escala,
+    conviértela en el Source ANTES de emitir."""
 
     ts: Optional[int] = None
     """Marca de tiempo epoch en milisegundos. None = 'ahora' (lo pone el motor)."""
+
+    metricas: dict[str, float] = field(default_factory=dict)
+    """Magnitudes EXTRA además de la vibración (temperatura, presión, rpm,
+    corriente…), normalizadas a {clave_canónica: float}. NUNCA incluye 'vib'
+    (esa viaja en el campo `vib`). Vacío = la fuente solo aporta vibración, por
+    lo que el comportamiento es idéntico al de antes de multi-variable. Las
+    claves deben pertenecer al vocabulario de app/constants.py (CLAVES_EXTRA);
+    el motor filtra lo desconocido, pero el Source debería mapearlas bien."""
+
+    def valores(self) -> dict[str, float]:
+        """Todas las magnitudes juntas, incluido el pivote:
+        ``{"vib": self.vib, **self.metricas}``. Útil para KPIs y almacenamiento."""
+        return {"vib": self.vib, **self.metricas}
 
 
 # Función que el runner registra para recibir cada lectura (fuente → motor).
