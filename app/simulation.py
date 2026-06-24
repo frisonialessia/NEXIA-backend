@@ -87,26 +87,33 @@ def crear_maquina(seed: dict) -> Maquina:
     )
 
 
-def tick_maquina(m: Maquina) -> Optional[dict]:
-    """Avanza una máquina un paso. Devuelve una AlertaDTO si acaba de entrar en
-    crítico; si no, None. Muta la máquina en sitio."""
+def _avanzar_baseline(m: Maquina) -> None:
+    """Avanza el reloj de la máquina y recalcula su baseline esperada (componente
+    cíclica diaria). Común a la simulación y a la ingesta real."""
     m.tick += 1
     m.horas_op += 0.01
-
     dt = datetime.now()
     hora = dt.hour + dt.minute / 60
     ritmo = 0.3 * math.sin(((hora - 9) / 24) * 2 * math.pi)
     m.expected = round(m.base + ritmo, 3)
 
-    if m.esc == "sano":
-        v = m.expected + (random.random() - 0.5) * 0.4
-    elif m.esc == "degradando":
-        v = m.expected + min(m.tick * 0.05, 4.5) + (random.random() - 0.5) * 0.5
-    else:  # critico
-        v = m.expected + 4 + random.random() * 2
-    v = max(0.0, round(v, 3))
 
-    now_ms = _ahora_ms()
+def _vibracion_simulada(m: Maquina) -> float:
+    """Genera la vibración SIMULADA según el escenario. En ingesta real, este
+    valor llega del sensor y esta función no se usa."""
+    if m.esc == "sano":
+        return m.expected + (random.random() - 0.5) * 0.4
+    if m.esc == "degradando":
+        return m.expected + min(m.tick * 0.05, 4.5) + (random.random() - 0.5) * 0.5
+    return m.expected + 4 + random.random() * 2  # critico
+
+
+def _evaluar(m: Maquina, v: float, now_ms: int) -> Optional[dict]:
+    """EL MOTOR. Dada una lectura de vibración `v` (venga de donde venga),
+    aplica calibración, probabilidad de fallo y la FSM, y devuelve una alerta si
+    la máquina acaba de entrar en crítico. NO sabe si el dato es real o simulado:
+    esta es la frontera entre la fuente de datos y la lógica de cómputo."""
+    v = max(0.0, round(v, 3))
 
     # ── Calibración: aprendiendo baseline (sin juzgar, sin alertas) ──────────
     if m.calib > 0:
@@ -145,6 +152,20 @@ def tick_maquina(m: Maquina) -> Optional[dict]:
         m.hist.pop(0)
 
     return alerta
+
+
+def tick_maquina(m: Maquina) -> Optional[dict]:
+    """Un paso de SIMULACIÓN: avanza el baseline, genera la vibración simulada y
+    la evalúa. Devuelve una alerta si acaba de entrar en crítico."""
+    _avanzar_baseline(m)
+    return _evaluar(m, _vibracion_simulada(m), _ahora_ms())
+
+
+def procesar_lectura(m: Maquina, vib: float, ts: Optional[int] = None) -> Optional[dict]:
+    """Procesa una lectura REAL ya normalizada (vib en mm/s) que entra por el
+    módulo de ingesta. Mismo motor que la simulación, distinta fuente."""
+    _avanzar_baseline(m)
+    return _evaluar(m, float(vib), ts or _ahora_ms())
 
 
 def _evento_deteccion(a: dict) -> dict:
@@ -210,6 +231,30 @@ class FleetEngine:
         if nuevas:
             update["nuevasAlertas"] = nuevas
             update["nuevosEventos"] = [_evento_deteccion(a) for a in nuevas]
+        return update
+
+    # ── Ingesta de datos REALES ───────────────────────────────────────────────
+    def ingest(self, maquina_id: str, vib: float, ts: Optional[int] = None) -> Optional[dict]:
+        """Punto de entrada para una lectura real (la llama el módulo de ingesta,
+        ver app/ingest/). Procesa la lectura con el MISMO motor que la simulación
+        y devuelve el parche 'update' para el WebSocket, o None si la máquina no
+        existe. El motor no sabe de qué fuente vino el dato."""
+        m = self._maquina(maquina_id)
+        if m is None:
+            # Máquina desconocida. Para auto-registrar activos al vuelo, aquí se
+            # podría crear con crear_maquina({...}); de momento se ignora.
+            return None
+
+        alerta = procesar_lectura(m, vib, ts)
+        if alerta:
+            self.alertas = [alerta] + self.alertas
+            self.historial = [_a_historial(alerta)] + self.historial
+            self.eventos = ([_evento_deteccion(alerta)] + self.eventos)[:MAX_EVENTOS]
+
+        update: dict = {"type": "update", "maquinas": [mm.to_dto() for mm in self.flota]}
+        if alerta:
+            update["nuevasAlertas"] = [alerta]
+            update["nuevosEventos"] = [_evento_deteccion(alerta)]
         return update
 
     # ── Snapshot completo ─────────────────────────────────────────────────────
