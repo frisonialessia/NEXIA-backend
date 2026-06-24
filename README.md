@@ -56,20 +56,59 @@ Cualquier host de Python sirve. Opciones incluidas:
 
 Recuerda fijar `NEXIA_CORS_ORIGINS` a tu dominio de Vercel en producción.
 
+## Módulo de ingesta (conectar máquinas reales)
+
+El "enchufe" para datos reales, desacoplado del motor (patrón puerto/adaptador).
+La fuente de datos se elige por `NEXIA_SOURCE` **sin tocar el motor ni la UI**:
+
+| `NEXIA_SOURCE` | Qué hace |
+|---|---|
+| `sim` (def.) | Simulador interno (sin hardware). |
+| `csv` | Reproduce `app/ingest/sample_readings.csv`. Prueba todo el pipeline. |
+| `mqtt` | Escucha un broker MQTT real (gateway que publica). |
+| `opcua` | Lee un **PLC / gateway industrial** por OPC UA. |
+
+Conectores reales (MQTT/OPC UA) requieren `pip install -r requirements-ingest.txt`.
+El `🔌 MAPEO` de nodos/campos y la `🔌 AUTENTICACIÓN` están marcados en cada adaptador.
+
+Probar el pipeline con datos "reales" desde un CSV:
+
+```bash
+NEXIA_SOURCE=csv uvicorn app.main:app --reload
+```
+
+**Cómo encaja:** cualquier fuente normaliza sus datos a una `Lectura`
+(`maquina_id`, `vib` en mm/s, `ts`) y los emite; el runner los mete al motor con
+`engine.ingest()` y difunde por el WebSocket. El motor no sabe de dónde vino el
+dato. Añadir Modbus/OPC UA/HTTP = escribir un `Source` nuevo y una rama en
+`crear_source()`. La **autenticación** y el **mapeo de campos** están marcados
+con `🔌` en cada adaptador (ver `app/ingest/sources/mqtt_source.py`).
+
+```
+app/ingest/
+  source.py              Lectura + Source (el contrato/puerto)
+  runner.py              crear_source() (factory por entorno) + cableado al motor
+  sources/csv_source.py   adaptador CSV (funcional)
+  sources/mqtt_source.py  adaptador MQTT (gateway que publica)
+  sources/opcua_source.py adaptador OPC UA (PLC industrial)
+  sample_readings.csv     datos de ejemplo
+```
+
 ## Estructura
 
 ```
 app/
-  main.py         FastAPI: rutas, WebSocket, bucle del motor (lifespan)
+  main.py         FastAPI: rutas, WebSocket, elige simulación o ingesta (lifespan)
   contract.py     modelos de E/S (espejo de lib/api/contract.ts)
   constants.py    constantes del dominio (espejo de lib/constants.ts)
   engine.py       FSM con histéresis + detección (espejo de lib/engine/fsm.ts)
-  simulation.py   planta virtual: estado vivo, tick y comandos
+  simulation.py   motor: estado vivo, tick (sim), procesar_lectura (real), comandos
   hub.py          gestor de conexiones WebSocket
+  ingest/         módulo de ingesta (conectar fuentes reales)
 ```
 
 ## Próximos pasos (cuando crezca)
 
 - Persistencia (Postgres/TimescaleDB) para historial y series.
 - Autenticación (el contrato ya contempla `Authorization: Bearer`).
-- Ingesta real de sensores (Modbus/OPC UA/MQTT) reemplazando la planta virtual.
+- Adaptadores Modbus TCP / OPC UA (usar `mqtt_source.py` como plantilla).

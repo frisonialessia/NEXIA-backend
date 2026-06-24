@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .constants import INTERVALO_S
 from .contract import ComandoEtiquetar, MaquinaPatchDTO, MaquinaSeedDTO, SnapshotDTO
 from .hub import ConnectionHub
+from .ingest.runner import correr_ingesta, crear_source
+from .ingest.source import Lectura
 from .simulation import FleetEngine
 
 engine = FleetEngine()
@@ -29,7 +31,7 @@ async def _broadcast_snapshot() -> None:
 
 
 async def _bucle_motor() -> None:
-    """Avanza la planta cada INTERVALO_S y difunde el parche a los clientes."""
+    """Modo SIMULACIÓN: avanza la planta cada INTERVALO_S y difunde el parche."""
     while True:
         await asyncio.sleep(INTERVALO_S)
         async with lock:
@@ -37,12 +39,30 @@ async def _bucle_motor() -> None:
             await hub.broadcast(update)
 
 
+async def _on_lectura(lectura: Lectura) -> None:
+    """Modo INGESTA: puente fuente → motor. Mete la lectura real al motor y
+    difunde el resultado por el WebSocket. Lo invoca cada Source por cada dato."""
+    async with lock:
+        update = engine.ingest(lectura.maquina_id, lectura.vib, lectura.ts)
+        if update:
+            await hub.broadcast(update)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    tarea = asyncio.create_task(_bucle_motor())
+    # Elige la fuente de datos según el entorno (NEXIA_SOURCE): simulador interno
+    # o un módulo de ingesta externo (CSV/MQTT/PLC…). El resto del backend no
+    # cambia: el motor y el WebSocket son los mismos.
+    source = crear_source()
+    if source is None:
+        tarea = asyncio.create_task(_bucle_motor())          # simulación
+    else:
+        tarea = asyncio.create_task(correr_ingesta(source, _on_lectura))  # ingesta real
     try:
         yield
     finally:
+        if source is not None:
+            await source.stop()
         tarea.cancel()
         try:
             await tarea

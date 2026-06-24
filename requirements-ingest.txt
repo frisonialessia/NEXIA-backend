@@ -1,0 +1,11 @@
+# Dependencias OPCIONALES para conectar fuentes reales (módulo de ingesta).
+# Instálalas solo si vas a usar ese conector:
+#   pip install -r requirements-ingest.txt
+#
+# El backend en modo simulado (NEXIA_SOURCE=sim) NO las necesita.
+
+# MQTT (NEXIA_SOURCE=mqtt) — gateways que publican lecturas.
+paho-mqtt==2.1.0
+
+# OPC UA (NEXIA_SOURCE=opcua) — PLCs / gateways industriales.
+asyncua==1.1.5
