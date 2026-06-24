@@ -14,11 +14,11 @@
 #   - vib: vibración RMS en mm/s (el PIVOTE de detección).
 #   - ts: epoch ms (opcional; vacío = 'ahora').
 #
-# MULTI-VARIABLE: cualquier columna EXTRA cuyo nombre pertenezca al vocabulario
-# canónico (app/constants.py → CLAVES_EXTRA: temperatura, presion, rpm,
-# corriente, voltaje, caudal) se lee como métrica adicional. Las celdas vacías o
-# no numéricas se omiten; las columnas desconocidas se ignoran. El formato de 3
-# columnas de siempre sigue funcionando igual (sin métricas extra).
+# MULTI-VARIABLE: CUALQUIER columna extra (más allá de maquina_id/vib/ts) se lee
+# como métrica adicional si su celda es numérica (passthrough). Las celdas vacías
+# o no numéricas se omiten. Usa los nombres del vocabulario canónico
+# (app/constants.py: temperatura, presion, rpm, corriente, voltaje, caudal) para
+# que hereden unidad/label. El formato de 3 columnas de siempre sigue igual.
 # Ver app/ingest/sample_readings_multi.csv para un ejemplo con varias magnitudes.
 #
 # 🔌 MAPEO DE CAMPOS: si tu CSV usa otros nombres para máquina/vibración/ts
@@ -31,7 +31,6 @@ import asyncio
 import csv
 from typing import Optional
 
-from ...constants import CLAVES_EXTRA
 from ..source import Lectura, Source
 
 # 🔌 Mapeo de campos: nombres de columna esperados en el CSV de origen.
@@ -70,12 +69,12 @@ class CsvReplaySource(Source):
 
     @staticmethod
     def _metricas_de(row: dict) -> dict[str, float]:
-        """Extrae las columnas EXTRA del vocabulario canónico como métricas. Las
-        columnas base (maquina_id/vib/ts) y las desconocidas se ignoran; las
-        celdas vacías o no numéricas se descartan."""
+        """Extrae como métricas TODAS las columnas extra (más allá de las base
+        maquina_id/vib/ts) cuya celda sea numérica (passthrough). Las celdas
+        vacías o no numéricas se descartan."""
         metricas: dict[str, float] = {}
         for col, val in row.items():
-            if col in _COLS_BASE or col not in CLAVES_EXTRA:
+            if col in _COLS_BASE:
                 continue
             val = (val or "").strip()
             if not val:
