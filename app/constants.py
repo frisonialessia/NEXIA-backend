@@ -13,6 +13,59 @@ AHORRO_POR_PARADA = COSTO_HORA_PARADA * HORAS_PARADA_TIPICA  # 12000
 UMBRAL_CRITICO = 6.5
 CALIBRACION_TICKS = 6  # una máquina nueva aprende su baseline antes de alertar
 
+# ── Métricas multi-variable ──────────────────────────────────────────────────
+# Vocabulario CANÓNICO de magnitudes que puede transportar una Lectura. 'vib'
+# (vibración) es el PIVOTE: la magnitud sobre la que el motor calcula la
+# probabilidad de fallo y corre la FSM. El resto son telemetría ADITIVA: se
+# almacenan y se exponen en el contrato, pero hoy NO alteran la detección. Son,
+# además, la base para KPIs futuros (OEE, eficiencia, energía → ver app/kpis.py).
+#
+# Añadir una magnitud nueva = una línea en METRICAS + CAMPOS_TELEMETRIA. Motor,
+# adaptadores y KPIs derivan todos de aquí.
+#
+# Las claves usan los MISMOS nombres cortos que el TelemetriaDTO del contrato
+# (espejo del frontend): temp, pres, rpm, caudal, corriente.
+METRICA_PIVOTE = "vib"
+
+METRICAS: dict[str, dict[str, str]] = {
+    "vib":       {"unidad": "mm/s", "label": "Vibración"},
+    "temp":      {"unidad": "°C",   "label": "Temperatura"},
+    "pres":      {"unidad": "bar",  "label": "Presión"},
+    "rpm":       {"unidad": "rpm",  "label": "Velocidad"},
+    "caudal":    {"unidad": "m³/h", "label": "Caudal"},
+    "corriente": {"unidad": "A",    "label": "Corriente"},
+}
+
+# Las 5 magnitudes (en ORDEN) que componen la telemetría = el TelemetriaDTO del
+# contrato. 'vib' (el pivote de detección) viaja aparte, en su propio campo.
+CAMPOS_TELEMETRIA = ("temp", "pres", "rpm", "caudal", "corriente")
+
+
+def es_metrica_valida(clave: str) -> bool:
+    """True si `clave` pertenece al vocabulario canónico (vib + telemetría)."""
+    return clave in METRICAS
+
+
+def unidad(clave: str) -> str:
+    """Unidad de una métrica (cadena vacía si no está en el vocabulario)."""
+    m = METRICAS.get(clave)
+    return m["unidad"] if m else ""
+
+
+# ── Reglas multi-variable (alertas que NO son de vibración) ──────────────────
+# Detección por umbral simple y EDGE-TRIGGERED (una alerta al cruzar el umbral,
+# no una por tick mientras siga fuera). Defaults globales; un override por
+# máquina/tipo es trabajo futuro (iría en el seed / PATCH de la máquina).
+UMBRAL_TEMP = 80.0   # °C  — por encima: alerta de sobretemperatura
+PRES_MIN = 1.0       # bar — por debajo: alerta de presión baja
+PRES_MAX = 10.0      # bar — por encima: alerta de sobrepresión
+
+# ── Nominales para KPIs (OEE / eficiencia / energía) ─────────────────────────
+# Valores de diseño con los que se normalizan las magnitudes medidas. Son la
+# "base": el día que haya datos por máquina (placa, histórico) se parametrizan.
+CAUDAL_NOMINAL = 100.0  # m³/h — caudal de diseño (rendimiento = real / nominal)
+
+
 # ── Motor / simulación ──────────────────────────────────────────────────────
 TICKS_CALENTAMIENTO = 8
 INTERVALO_S = 2.0

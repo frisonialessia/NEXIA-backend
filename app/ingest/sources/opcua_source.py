@@ -26,20 +26,41 @@ import asyncio
 import json
 import os
 
+from ...constants import CAMPOS_TELEMETRIA, METRICA_PIVOTE
 from ..source import Lectura, Source
 
 # ── 🔌 MAPEO DE NODOS ───────────────────────────────────────────────────────
-# Qué nodo OPC UA corresponde a qué máquina (y qué magnitud mide). Edítalo aquí,
-# o pásalo por la variable de entorno OPCUA_NODES como JSON con esta misma forma.
-# Hoy el motor consume 'vib' (vibración mm/s); cuando ampliemos a multi-variable
-# (temp, presion, rpm, corriente…) bastará con añadir entradas con otro 'campo'.
+# Qué nodo OPC UA corresponde a qué máquina y qué magnitud ('campo') mide.
+# Edítalo aquí, o pásalo por la variable de entorno OPCUA_NODES como JSON con
+# esta misma forma. 'campo' usa el vocabulario canónico (app/constants.py):
+# 'vib' es el PIVOTE de detección; el resto (temp, pres, rpm, caudal, corriente,
+# voltaje) son telemetría multi-variable.
+#
+# Por cada ciclo se leen TODOS los nodos, se AGRUPAN por máquina y se emite UNA
+# `Lectura` multi-variable por máquina (vib + el resto como telemetría). Así un
+# mismo PLC alimenta varias magnitudes de un activo en una sola lectura. Para que
+# el frontend reciba `telemetria` (las 5 magnitudes), mapea las 5 de la máquina.
 NODOS_POR_DEFECTO = [
     {"node": "ns=2;i=1001", "maquina": "Bomba de agua cruda", "campo": "vib"},
-    {"node": "ns=2;i=1002", "maquina": "Compresor de aire #2", "campo": "vib"},
+    {"node": "ns=2;i=1002", "maquina": "Bomba de agua cruda", "campo": "temp"},
+    {"node": "ns=2;i=1003", "maquina": "Bomba de agua cruda", "campo": "pres"},
+    {"node": "ns=2;i=1004", "maquina": "Bomba de agua cruda", "campo": "rpm"},
+    {"node": "ns=2;i=1005", "maquina": "Bomba de agua cruda", "campo": "caudal"},
+    {"node": "ns=2;i=1006", "maquina": "Bomba de agua cruda", "campo": "corriente"},
+    {"node": "ns=2;i=2001", "maquina": "Compresor de aire #2", "campo": "vib"},
 ]
 
 # Reconexión con backoff (s) si el servidor del PLC se cae.
 _BACKOFF_S = [2, 5, 10, 30]
+
+
+def agrupar_por_maquina(nodos: list[dict]) -> dict[str, list[dict]]:
+    """Agrupa la lista de nodos por máquina, preservando el orden de aparición.
+    Función PURA (sin E/S), por eso es trivial de testear sin un servidor OPC UA."""
+    grupos: dict[str, list[dict]] = {}
+    for n in nodos:
+        grupos.setdefault(n["maquina"], []).append(n)
+    return grupos
 
 
 class OpcUaSource(Source):
@@ -55,6 +76,9 @@ class OpcUaSource(Source):
         # Mapeo de nodos: por entorno (JSON) o el de arriba.
         raw = os.getenv("OPCUA_NODES")
         self.nodos = json.loads(raw) if raw else NODOS_POR_DEFECTO
+        # Agrupados por máquina una sola vez: cada ciclo emite una Lectura
+        # multi-variable por máquina (no una por nodo).
+        self._grupos = agrupar_por_maquina(self.nodos)
         self._corriendo = False
 
     async def run(self) -> None:
@@ -89,17 +113,28 @@ class OpcUaSource(Source):
                 await asyncio.sleep(espera)
 
     async def _leer_todos(self, client) -> None:
-        for n in self.nodos:
-            # Hoy solo se consume la vibración; el resto se ignora hasta que el
-            # motor sea multi-variable.
-            if n.get("campo", "vib") != "vib":
+        """Lee todos los nodos de cada máquina y emite UNA Lectura multi-variable
+        por máquina: vibración (pivote) + el resto como telemetría."""
+        for maquina, nodos in self._grupos.items():
+            valores: dict[str, float] = {}
+            for n in nodos:
+                campo = n.get("campo", METRICA_PIVOTE)
+                if campo != METRICA_PIVOTE and campo not in CAMPOS_TELEMETRIA:
+                    continue  # magnitud fuera del vocabulario → se ignora
+                try:
+                    valor = await client.get_node(n["node"]).read_value()
+                    valores[campo] = float(valor)
+                except Exception:
+                    # Un nodo ilegible no debe tumbar el resto: se omite ESA
+                    # magnitud, no la máquina entera.
+                    continue
+            vib = valores.pop(METRICA_PIVOTE, None)
+            if vib is None:
+                # Sin vibración este ciclo: el motor pivota sobre vib, así que no
+                # se emite (la telemetría sin pivote es trabajo futuro).
                 continue
-            try:
-                valor = await client.get_node(n["node"]).read_value()
-                await self.emit(Lectura(maquina_id=n["maquina"], vib=float(valor)))
-            except Exception:
-                # Un nodo ilegible no debe tumbar la lectura de los demás.
-                continue
+            # `valores` ya solo tiene campos de telemetría → kwargs de Lectura.
+            await self.emit(Lectura(maquina_id=maquina, vib=vib, **valores))
 
     async def stop(self) -> None:
         self._corriendo = False

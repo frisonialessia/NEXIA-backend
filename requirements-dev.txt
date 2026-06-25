@@ -1,0 +1,8 @@
+# Dependencias de DESARROLLO (tests). No se instalan en producción
+# (Dockerfile/render usan requirements.txt). Instálalas para correr la suite:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   pytest -q
+
+pytest==8.3.4
+httpx==0.28.1   # cliente para fastapi.testclient.TestClient
+anyio==4.7.0    # backend async que usa TestClient

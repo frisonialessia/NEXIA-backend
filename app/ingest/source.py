@@ -24,6 +24,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
+from ..constants import CAMPOS_TELEMETRIA
+
 
 @dataclass
 class Lectura:
@@ -36,11 +38,41 @@ class Lectura:
     en el Source concreto (ver el mapeo de campos en cada adaptador)."""
 
     vib: float
-    """Vibración RMS en mm/s (la magnitud que consume el motor). Si tu sensor
-    entrega otra unidad/escala, conviértela en el Source ANTES de emitir."""
+    """Vibración RMS en mm/s. Es el PIVOTE: la magnitud sobre la que el motor
+    calcula la probabilidad de fallo. Si tu sensor entrega otra unidad/escala,
+    conviértela en el Source ANTES de emitir."""
 
     ts: Optional[int] = None
     """Marca de tiempo epoch en milisegundos. None = 'ahora' (lo pone el motor)."""
+
+    # ── Telemetría: magnitudes EXTRA además de la vibración (todas opcionales) ──
+    # Espejo del TelemetriaDTO del contrato. Una fuente que solo tenga vibración
+    # las deja en None y el comportamiento es idéntico al de antes de
+    # multi-variable. NUNCA incluyen 'vib' (esa viaja en el campo `vib`).
+    temp: Optional[float] = None
+    """Temperatura (°C)."""
+    pres: Optional[float] = None
+    """Presión (bar)."""
+    rpm: Optional[float] = None
+    """Velocidad real medida (rpm)."""
+    caudal: Optional[float] = None
+    """Caudal (m³/h)."""
+    corriente: Optional[float] = None
+    """Corriente del motor (A)."""
+
+    def telemetria(self) -> dict[str, float]:
+        """Las magnitudes de telemetría PRESENTES como ``{clave: float}`` (sin
+        'vib'). Es lo que se entrega al motor (`engine.ingest(..., telemetria=…)`)."""
+        return {
+            c: float(getattr(self, c))
+            for c in CAMPOS_TELEMETRIA
+            if getattr(self, c) is not None
+        }
+
+    def valores(self) -> dict[str, float]:
+        """Todas las magnitudes juntas, incluido el pivote:
+        ``{"vib": self.vib, **self.telemetria()}``. Útil para KPIs y almacenamiento."""
+        return {"vib": self.vib, **self.telemetria()}
 
 
 # Función que el runner registra para recibir cada lectura (fuente → motor).
