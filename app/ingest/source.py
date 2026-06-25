@@ -24,6 +24,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Optional
 
+from ..constants import CAMPOS_TELEMETRIA
+
 
 @dataclass
 class Lectura:
@@ -44,17 +46,48 @@ class Lectura:
     """Marca de tiempo epoch en milisegundos. None = 'ahora' (lo pone el motor)."""
 
     metricas: dict[str, float] = field(default_factory=dict)
-    """Magnitudes EXTRA además de la vibración (temperatura, presión, rpm,
-    corriente…), normalizadas a {clave_canónica: float}. NUNCA incluye 'vib'
-    (esa viaja en el campo `vib`). Vacío = la fuente solo aporta vibración, por
-    lo que el comportamiento es idéntico al de antes de multi-variable. Las
+    """Magnitudes EXTRA además de la vibración (temp, pres, rpm, caudal,
+    corriente, voltaje…), normalizadas a {clave_canónica: float}. NUNCA incluye
+    'vib' (esa viaja en el campo `vib`). Vacío = la fuente solo aporta vibración,
+    por lo que el comportamiento es idéntico al de antes de multi-variable. Las
     claves deben pertenecer al vocabulario de app/constants.py (CLAVES_EXTRA);
-    el motor filtra lo desconocido, pero el Source debería mapearlas bien."""
+    el motor filtra lo desconocido, pero el Source debería mapearlas bien.
+
+    Forma GENÉRICA y extensible de transportar magnitudes (cualquier clave del
+    vocabulario). Para las 5 magnitudes de telemetría hay además campos
+    nombrados (abajo); ambas vías conviven y se funden con `todas_metricas()`."""
+
+    # ── Campos NOMBRADOS de telemetría (ergonómicos, tipados) ────────────────
+    # Espejo del TelemetriaDTO del contrato. Son atajos opcionales: una fuente
+    # puede rellenar estos o el dict `metricas`; el motor recibe la unión.
+    temp: Optional[float] = None
+    """Temperatura (°C)."""
+    pres: Optional[float] = None
+    """Presión (bar)."""
+    rpm: Optional[float] = None
+    """Velocidad real medida (rpm)."""
+    caudal: Optional[float] = None
+    """Caudal (m³/h)."""
+    corriente: Optional[float] = None
+    """Corriente del motor (A)."""
+
+    def todas_metricas(self) -> dict[str, float]:
+        """Une las magnitudes extra del dict `metricas` con los campos nombrados
+        (estos tienen prioridad si coinciden). Nunca incluye 'vib'. Es lo que se
+        entrega al motor: una sola vista de la telemetría, venga del dict o de
+        los campos tipados."""
+        out = dict(self.metricas)
+        for campo in CAMPOS_TELEMETRIA:
+            valor = getattr(self, campo)
+            if valor is not None:
+                out[campo] = float(valor)
+        return out
 
     def valores(self) -> dict[str, float]:
         """Todas las magnitudes juntas, incluido el pivote:
-        ``{"vib": self.vib, **self.metricas}``. Útil para KPIs y almacenamiento."""
-        return {"vib": self.vib, **self.metricas}
+        ``{"vib": self.vib, **self.todas_metricas()}``. Útil para KPIs y
+        almacenamiento."""
+        return {"vib": self.vib, **self.todas_metricas()}
 
 
 # Función que el runner registra para recibir cada lectura (fuente → motor).

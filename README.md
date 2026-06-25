@@ -87,7 +87,7 @@ y el **mapeo de campos** están marcados con `🔌` en cada adaptador (ver
 
 ```
 app/ingest/
-  source.py               Lectura (vib + metricas) + Source (el contrato/puerto)
+  source.py               Lectura (vib + telemetría) + Source (el contrato/puerto)
   runner.py               crear_source() (factory por entorno) + cableado al motor
   sources/csv_source.py   adaptador CSV (funcional, lee magnitudes extra)
   sources/mqtt_source.py  adaptador MQTT (gateway que publica)
@@ -99,37 +99,59 @@ app/ingest/
 ## Multi-variable (varias magnitudes por máquina)
 
 Una `Lectura` lleva la **vibración** (`vib`, el PIVOTE de detección) y, de forma
-**opcional**, otras magnitudes en `metricas` (`{clave: float}`): temperatura,
-presión, rpm, corriente… El vocabulario canónico vive en un solo sitio,
-`app/constants.py` (`METRICAS`), y **añadir una magnitud es una línea**; motor,
-adaptadores y KPIs derivan de ahí.
+**opcional**, otras magnitudes: los campos nombrados `temp`, `pres`, `rpm`,
+`caudal`, `corriente`, y/o un dict genérico `metricas` (`{clave: float}`) para el
+resto del vocabulario (p. ej. `voltaje`). El vocabulario canónico vive en un solo
+sitio, `app/constants.py` (`METRICAS` / `CAMPOS_TELEMETRIA`), con los **mismos
+nombres cortos que el frontend**; añadir una magnitud es una línea.
 
-- **La detección no cambia.** La probabilidad de fallo y la FSM siguen pivotando
-  solo sobre `vib`. Las demás magnitudes son **telemetría aditiva**: se almacenan
-  (`Maquina.metricas`, carry-forward del último valor por magnitud) y se exponen,
-  pero no alteran las alertas. Son, además, la base para KPIs (OEE, energía…).
-- **No rompe el frontend (aditivo).** Los campos nuevos del contrato son
-  **opcionales**: `MaquinaDTO.metricas`, `AlertaDTO.metricas` y `LecturaDTO.m`
-  (las magnitudes en cada punto del historial). En modo simulado por defecto van
-  vacíos: el WebSocket emite **exactamente** el mismo payload que antes y por REST
-  los campos llegan como `null` (el frontend los ignora hasta querer graficarlos).
-  `vib`/`exp`/`v` siguen siendo el eje. Quedan documentados en `/docs`.
+- **La detección de fallo no cambia.** La probabilidad y la FSM siguen pivotando
+  solo sobre `vib`. Las demás magnitudes son telemetría: se almacenan
+  (`Maquina.metricas`, carry-forward del último valor por magnitud) y se exponen.
+- **Dos vistas en el contrato (aditivas y opcionales):**
+  - `MaquinaDTO.metricas` — dict genérico y extensible (cualquier magnitud).
+  - `MaquinaDTO.telemetria` — `TelemetriaDTO` **tipado** (las 5 magnitudes que
+    grafica el frontend: temp/pres/rpm/caudal/corriente). Solo se emite cuando las
+    **5 están completas** (sus campos son floats no-nulos); si falta alguna → `null`.
+  - `MaquinaDTO.kpis` — `KpisDTO` con energía/eficiencia/OEE derivados (ver abajo).
+  - `AlertaDTO` gana `campo`/`valor`/`limite` (qué magnitud disparó y su límite).
+  - `LecturaDTO.m` — las magnitudes en cada punto del historial.
+- **No rompe el frontend.** Todo lo anterior es opcional; `vib`/`exp`/`v` y el
+  núcleo de las alertas no cambian. Con `NEXIA_SIM_MULTIVAR=0` el payload en vivo
+  es **idéntico** al de antes de multi-variable. Todo queda documentado en `/docs`.
 - **Adaptadores:** el CSV lee como métrica cualquier columna extra del vocabulario
   (`sample_readings_multi.csv`); el MQTT toma las claves extra del payload JSON; el
-  OPC UA **agrupa los nodos por máquina** y emite **una** `Lectura` multi-variable
-  por máquina y ciclo (`vib` + el resto en `metricas`).
-- **Demo en vivo:** `NEXIA_SIM_MULTIVAR=1` hace que el simulador genere magnitudes
-  plausibles (apagado por defecto, para no tocar el payload en vivo).
+  OPC UA **agrupa los nodos por máquina** (cada nodo mapea un `campo`) y emite
+  **una** `Lectura` multi-variable por máquina y ciclo (`vib` + el resto).
+
+### Reglas multi-variable (alertas que no son de vibración)
+
+Además de la FSM de vibración, hay reglas por umbral **edge-triggered** (una alerta
+al cruzar el umbral; se rearma al volver al rango), configurables en
+`app/constants.py`:
+
+- **Sobretemperatura:** `temp > UMBRAL_TEMP` (80 °C).
+- **Presión fuera de rango:** `pres < PRES_MIN` (1 bar) o `pres > PRES_MAX` (10 bar).
+
+Cada una emite una `AlertaDTO` normal (mismo formato que la de vibración) con
+`campo` = `"temperatura"` | `"presion"` y su `valor`/`limite`.
+
+### KPIs (base de OEE / eficiencia / energía)
+
+`app/kpis.py` deriva, con la telemetría disponible, un `MaquinaDTO.kpis`:
+`energiaKw` (de `corriente` × voltaje), `eficiencia` (`caudal` / nominal) y un `oee`
+base (rendimiento real por caudal; disponibilidad y calidad son placeholders
+documentados hasta tener datos de parada/scrap). Solo aparece lo calculable con los
+datos presentes; es una capa aparte que **no toca la FSM**.
+
+### Demo
 
 ```bash
 # Pipeline real con varias magnitudes desde un CSV:
 NEXIA_SOURCE=csv NEXIA_CSV_PATH=app/ingest/sample_readings_multi.csv uvicorn app.main:app --reload
-# Simulador con métricas de demo:
-NEXIA_SIM_MULTIVAR=1 uvicorn app.main:app --reload
+# El simulador genera telemetría por defecto; para apagarla (payload "clásico"):
+NEXIA_SIM_MULTIVAR=0 uvicorn app.main:app --reload
 ```
-
-`app/kpis.py` deja **listo el camino** para derivar OEE, eficiencia y energía a
-partir de esas magnitudes (funciones puras; aún no se exponen en el contrato).
 
 ## Tests
 
@@ -138,9 +160,10 @@ pip install -r requirements-dev.txt
 pytest -q
 ```
 
-Cubren la `Lectura` multi-variable, el motor (filtrado/carry-forward de métricas,
-e **invariante de que la FSM no cambia** con o sin magnitudes extra), la
-retrocompatibilidad del contrato, los tres adaptadores y los KPIs.
+Cubren la `Lectura` multi-variable, el motor (filtrado/carry-forward, telemetría
+**solo-si-completa**, e **invariante de que la FSM no cambia** con o sin magnitudes
+extra), las **reglas de temperatura/presión** (edge-trigger), la retrocompatibilidad
+del contrato, los tres adaptadores y los KPIs.
 
 ## Estructura
 
@@ -151,15 +174,18 @@ app/
   constants.py    constantes del dominio + vocabulario de métricas (METRICAS)
   engine.py       FSM con histéresis + detección (espejo de lib/engine/fsm.ts)
   simulation.py   motor: estado vivo, tick (sim), procesar_lectura (real), comandos
-  kpis.py         KPIs derivados (energía/eficiencia/OEE) — base, no en el contrato
+  kpis.py         KPIs derivados (energía/eficiencia/OEE), expuestos en MaquinaDTO.kpis
   hub.py          gestor de conexiones WebSocket
   ingest/         módulo de ingesta (conectar fuentes reales)
 ```
 
 ## Próximos pasos (cuando crezca)
 
-- Exponer KPIs en el contrato (p. ej. `MaquinaDTO.kpis`) reutilizando `app/kpis.py`.
-- Detección multi-variable (que temperatura/corriente influyan en la probabilidad).
-- Persistencia (Postgres/TimescaleDB) para historial y series.
-- Autenticación (el contrato ya contempla `Authorization: Bearer`).
+- Detección multi-variable (que temperatura/corriente influyan en la probabilidad,
+  no solo como reglas de umbral independientes).
+- OEE completo: disponibilidad (paradas) y calidad (scrap) con datos reales, en vez
+  de los placeholders actuales.
+- **FASE 2:** persistencia (Postgres/Supabase), login `Authorization: Bearer` y
+  multi-tenant (filtrar por organización en REST y WebSocket).
+- **FASE 3:** empaquetar `app/ingest/` como agente edge (Docker) dentro de la planta.
 - Adaptador Modbus TCP (usar `opcua_source.py` / `mqtt_source.py` como plantilla).

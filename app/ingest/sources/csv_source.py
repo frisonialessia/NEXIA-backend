@@ -15,10 +15,10 @@
 #   - ts: epoch ms (opcional; vacío = 'ahora').
 #
 # MULTI-VARIABLE: cualquier columna EXTRA cuyo nombre pertenezca al vocabulario
-# canónico (app/constants.py → CLAVES_EXTRA: temperatura, presion, rpm,
-# corriente, voltaje, caudal) se lee como métrica adicional. Las celdas vacías o
-# no numéricas se omiten; las columnas desconocidas se ignoran. El formato de 3
-# columnas de siempre sigue funcionando igual (sin métricas extra).
+# canónico (app/constants.py → CLAVES_EXTRA: temp, pres, rpm, caudal, corriente,
+# voltaje) se lee como métrica adicional. Las celdas vacías o no numéricas se
+# omiten; las columnas desconocidas se ignoran. El formato de 3 columnas de
+# siempre sigue funcionando igual (sin métricas extra).
 # Ver app/ingest/sample_readings_multi.csv para un ejemplo con varias magnitudes.
 #
 # 🔌 MAPEO DE CAMPOS: si tu CSV usa otros nombres para máquina/vibración/ts

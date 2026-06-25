@@ -21,22 +21,32 @@ CALIBRACION_TICKS = 6  # una máquina nueva aprende su baseline antes de alertar
 # además, la base para KPIs futuros (OEE, eficiencia, energía → ver app/kpis.py).
 #
 # Añadir una magnitud nueva = una línea en METRICAS. Motor, adaptadores y KPIs
-# derivan todos de aquí (CLAVES_METRICAS / CLAVES_EXTRA), así no se toca nada más.
+# derivan todos de aquí (CLAVES_METRICAS / CLAVES_EXTRA / CAMPOS_TELEMETRIA).
+#
+# Las CLAVES usan los MISMOS nombres cortos que el TelemetriaDTO del contrato
+# (espejo del frontend): temp, pres, rpm, caudal, corriente. Así el dict genérico
+# `metricas` y la `telemetria` tipada comparten vocabulario (no hay dos nombres
+# para la misma magnitud).
 METRICA_PIVOTE = "vib"
 
 METRICAS: dict[str, dict[str, str]] = {
-    "vib":         {"unidad": "mm/s", "label": "Vibración"},
-    "temperatura": {"unidad": "°C",   "label": "Temperatura"},
-    "presion":     {"unidad": "bar",  "label": "Presión"},
-    "rpm":         {"unidad": "rpm",  "label": "Velocidad"},
-    "corriente":   {"unidad": "A",    "label": "Corriente"},
-    "voltaje":     {"unidad": "V",    "label": "Voltaje"},
-    "caudal":      {"unidad": "m³/h", "label": "Caudal"},
+    "vib":       {"unidad": "mm/s", "label": "Vibración"},
+    "temp":      {"unidad": "°C",   "label": "Temperatura"},
+    "pres":      {"unidad": "bar",  "label": "Presión"},
+    "rpm":       {"unidad": "rpm",  "label": "Velocidad"},
+    "caudal":    {"unidad": "m³/h", "label": "Caudal"},
+    "corriente": {"unidad": "A",    "label": "Corriente"},
+    "voltaje":   {"unidad": "V",    "label": "Voltaje"},
 }
 
 # Todas las claves válidas, y las EXTRA (todo menos el pivote, que viaja aparte).
 CLAVES_METRICAS = set(METRICAS)
 CLAVES_EXTRA = CLAVES_METRICAS - {METRICA_PIVOTE}
+
+# Las 5 magnitudes que componen el TelemetriaDTO del contrato (en ORDEN). 'voltaje'
+# queda fuera a propósito: solo se usa para estimar energía en kpis.py, no es
+# telemetría de cara al frontend.
+CAMPOS_TELEMETRIA = ("temp", "pres", "rpm", "caudal", "corriente")
 
 
 def es_metrica_valida(clave: str) -> bool:
@@ -48,6 +58,20 @@ def unidad(clave: str) -> str:
     """Unidad de una métrica (cadena vacía si no está en el vocabulario)."""
     m = METRICAS.get(clave)
     return m["unidad"] if m else ""
+
+
+# ── Reglas multi-variable (alertas que NO son de vibración) ──────────────────
+# Detección por umbral simple y EDGE-TRIGGERED (una alerta al cruzar el umbral,
+# no una por tick mientras siga fuera). Defaults globales; un override por
+# máquina/tipo es trabajo futuro (iría en el seed / PATCH de la máquina).
+UMBRAL_TEMP = 80.0   # °C  — por encima: alerta de sobretemperatura
+PRES_MIN = 1.0       # bar — por debajo: alerta de presión baja
+PRES_MAX = 10.0      # bar — por encima: alerta de sobrepresión
+
+# ── Nominales para KPIs (OEE / eficiencia / energía) ─────────────────────────
+# Valores de diseño con los que se normalizan las magnitudes medidas. Son la
+# "base": el día que haya datos por máquina (placa, histórico) se parametrizan.
+CAUDAL_NOMINAL = 100.0  # m³/h — caudal de diseño (rendimiento = real / nominal)
 
 
 # ── Motor / simulación ──────────────────────────────────────────────────────

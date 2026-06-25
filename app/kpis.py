@@ -15,10 +15,18 @@ from __future__ import annotations
 import math
 from typing import Optional
 
+from .constants import CAUDAL_NOMINAL
+
 # Voltaje de línea por defecto (V) si el PLC no reporta 'voltaje'.
 VOLTAJE_NOMINAL = 400.0
 # Factor de potencia típico de un motor industrial cuando no se conoce.
 FACTOR_POTENCIA = 0.85
+
+# Placeholders de OEE hasta que haya datos reales de parada (disponibilidad) y de
+# scrap (calidad). Hoy solo el RENDIMIENTO sale de un dato medido (caudal/nominal);
+# el día que existan esos datos, estos dos se sustituyen por el valor real.
+DISPONIBILIDAD_BASE = 0.95
+CALIDAD_BASE = 0.99
 
 
 def energia_kw(
@@ -62,13 +70,32 @@ def oee(
 
 def desde_valores(valores: dict[str, float]) -> dict[str, float]:
     """Calcula los KPIs DERIVABLES con las magnitudes presentes en `valores`
-    (p. ej. {'vib','temperatura','corriente','voltaje'}). Solo incluye los que
-    se pueden calcular con los datos disponibles — no inventa nada.
+    (p. ej. {'vib','caudal','corriente','voltaje'}). Solo incluye los que se
+    pueden calcular con los datos disponibles — no inventa nada.
 
-    Pensado para alimentar un futuro MaquinaDTO.kpis (claves camelCase). Hoy
-    nadie lo llama desde el motor; es el punto de extensión para OEE/energía."""
+    Alimenta `MaquinaDTO.kpis` (claves camelCase). Capa aparte del motor: la FSM
+    de vibración no depende de esto."""
     kpis: dict[str, float] = {}
+
+    # Energía activa estimada a partir de la corriente del motor (+ voltaje
+    # nominal si el PLC no lo reporta).
     e = energia_kw(valores.get("corriente"), valores.get("voltaje", VOLTAJE_NOMINAL))
     if e is not None:
         kpis["energiaKw"] = e
+
+    # Eficiencia = caudal real / caudal de diseño (en %).
+    caudal = valores.get("caudal")
+    ef = eficiencia(caudal, CAUDAL_NOMINAL)
+    if ef is not None:
+        kpis["eficiencia"] = ef
+
+    # OEE base = Disponibilidad × Rendimiento × Calidad. Hoy solo el RENDIMIENTO
+    # sale de un dato medido (caudal/nominal); disponibilidad y calidad son
+    # placeholders documentados (ver arriba) hasta que haya datos de parada/scrap.
+    if caudal is not None and CAUDAL_NOMINAL > 0:
+        rendimiento = caudal / CAUDAL_NOMINAL
+        o = oee(DISPONIBILIDAD_BASE, rendimiento, CALIDAD_BASE)
+        if o is not None:
+            kpis["oee"] = o
+
     return kpis

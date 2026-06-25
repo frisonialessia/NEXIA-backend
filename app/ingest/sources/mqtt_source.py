@@ -43,12 +43,12 @@ class MqttSource(Source):
         """🔌 MAPEO DE CAMPOS — traduce el mensaje del gateway a `Lectura`.
         Ajusta esto al formato EXACTO que publique tu gateway. Ejemplo asumido:
             topic:   nexia/<maquina_id>/vibracion
-            payload: {"rms_mm_s": 4.2, "temperatura": 71.5, "rpm": 1480, "ts": ...}
+            payload: {"rms_mm_s": 4.2, "temp": 71.5, "rpm": 1480, "ts": ...}
 
         MULTI-VARIABLE: además de la vibración, cualquier clave del payload que
-        pertenezca al vocabulario canónico (temperatura, presion, rpm, corriente,
-        voltaje, caudal) se incluye como métrica extra. Si tu gateway usa otros
-        nombres, mapéalos aquí a las claves canónicas.
+        pertenezca al vocabulario canónico (temp, pres, rpm, caudal, corriente,
+        voltaje) se incluye como métrica extra. Si tu gateway usa otros nombres,
+        mapéalos aquí a las claves canónicas.
         """
         try:
             data = json.loads(payload.decode("utf-8"))

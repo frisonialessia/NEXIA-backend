@@ -52,6 +52,28 @@ class LecturaDTO(BaseModel):
     m: Optional[dict[str, float]] = None  # magnitudes extra en ese instante
 
 
+# Telemetría TIPADA (espejo EXACTO del frontend). Convive con el dict genérico
+# `metricas`: `metricas` es extensible (cualquier magnitud del vocabulario);
+# `telemetria` es la vista fija que el frontend grafica. Solo se emite cuando las
+# 5 magnitudes están presentes (por eso son floats no-nulos aquí, pero el campo
+# `MaquinaDTO.telemetria` es opcional).
+class TelemetriaDTO(BaseModel):
+    temp: float       # °C
+    pres: float       # bar
+    rpm: float        # RPM real medida
+    caudal: float     # m³/h
+    corriente: float  # A
+
+
+# KPIs derivados (base de OEE/eficiencia/energía). Todos opcionales: solo vienen
+# con valor cuando hay datos para calcularlos. Aditivo: el frontend los ignora
+# hasta que quiera mostrarlos.
+class KpisDTO(BaseModel):
+    eficiencia: Optional[float] = None   # % — caudal real / caudal nominal
+    oee: Optional[float] = None          # % — disponibilidad × rendimiento × calidad
+    energiaKw: Optional[float] = None    # kW activos estimados (corriente × voltaje)
+
+
 class MaquinaDTO(BaseModel):
     id: str
     sensor: str
@@ -67,7 +89,9 @@ class MaquinaDTO(BaseModel):
     hist: list[LecturaDTO]
     esc: Optional[Escenario] = None
     calib: Optional[int] = None
-    metricas: Optional[dict[str, float]] = None  # último valor por magnitud extra
+    metricas: Optional[dict[str, float]] = None  # dict genérico: último valor por magnitud extra
+    telemetria: Optional[TelemetriaDTO] = None   # vista tipada (5 magnitudes), solo si completa
+    kpis: Optional[KpisDTO] = None               # KPIs derivados (energía/eficiencia/OEE)
 
 
 class AlertaDTO(BaseModel):
@@ -83,6 +107,12 @@ class AlertaDTO(BaseModel):
     umbral: float
     estado: Optional[Literal["Pendiente", "Resuelto"]] = None
     metricas: Optional[dict[str, float]] = None  # magnitudes extra al detectar
+    # Aditivos: qué magnitud disparó la alerta y su valor/límite. `campo` es
+    # "vibracion" | "temperatura" | "presion". Permiten al frontend distinguir
+    # alertas de vibración de las de telemetría sin romper el contrato previo.
+    campo: Optional[str] = None
+    valor: Optional[float] = None
+    limite: Optional[float] = None
 
 
 class EventoDTO(BaseModel):

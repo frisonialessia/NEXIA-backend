@@ -7,7 +7,7 @@ from app.ingest.sources.opcua_source import OpcUaSource, agrupar_por_maquina
 def test_agrupar_por_maquina():
     nodos = [
         {"node": "n1", "maquina": "A", "campo": "vib"},
-        {"node": "n2", "maquina": "A", "campo": "temperatura"},
+        {"node": "n2", "maquina": "A", "campo": "temp"},
         {"node": "n3", "maquina": "B", "campo": "vib"},
     ]
     grupos = agrupar_por_maquina(nodos)
@@ -58,7 +58,7 @@ def _src(monkeypatch, nodos):
 def test_una_lectura_multivar_por_maquina(monkeypatch):
     nodos = [
         {"node": "v", "maquina": "A", "campo": "vib"},
-        {"node": "t", "maquina": "A", "campo": "temperatura"},
+        {"node": "t", "maquina": "A", "campo": "temp"},
         {"node": "r", "maquina": "A", "campo": "rpm"},
     ]
     src = _src(monkeypatch, nodos)
@@ -66,11 +66,11 @@ def test_una_lectura_multivar_por_maquina(monkeypatch):
     assert len(cap) == 1
     assert cap[0].maquina_id == "A"
     assert cap[0].vib == 4.0
-    assert cap[0].metricas == {"temperatura": 60.0, "rpm": 1500.0}
+    assert cap[0].metricas == {"temp": 60.0, "rpm": 1500.0}
 
 
 def test_sin_vib_no_emite(monkeypatch):
-    nodos = [{"node": "t", "maquina": "A", "campo": "temperatura"}]
+    nodos = [{"node": "t", "maquina": "A", "campo": "temp"}]
     src = _src(monkeypatch, nodos)
     cap = _correr(src, _FakeClient({"t": 60.0}))
     assert cap == []  # el motor pivota en vib; sin vib no se emite
@@ -79,7 +79,7 @@ def test_sin_vib_no_emite(monkeypatch):
 def test_nodo_ilegible_se_omite_solo_esa_magnitud(monkeypatch):
     nodos = [
         {"node": "v", "maquina": "A", "campo": "vib"},
-        {"node": "t", "maquina": "A", "campo": "temperatura"},
+        {"node": "t", "maquina": "A", "campo": "temp"},
     ]
     src = _src(monkeypatch, nodos)
     cap = _correr(src, _FakeClient({"v": 4.0, "t": RuntimeError("boom")}))

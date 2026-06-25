@@ -33,17 +33,20 @@ from ..source import Lectura, Source
 # Qué nodo OPC UA corresponde a qué máquina y qué magnitud ('campo') mide.
 # Edítalo aquí, o pásalo por la variable de entorno OPCUA_NODES como JSON con
 # esta misma forma. 'campo' usa el vocabulario canónico (app/constants.py):
-# 'vib' es el PIVOTE de detección; el resto (temperatura, presion, rpm,
-# corriente, voltaje, caudal) son telemetría multi-variable.
+# 'vib' es el PIVOTE de detección; el resto (temp, pres, rpm, caudal, corriente,
+# voltaje) son telemetría multi-variable.
 #
 # Por cada ciclo se leen TODOS los nodos, se AGRUPAN por máquina y se emite UNA
 # `Lectura` multi-variable por máquina (vib + el resto en `metricas`). Así un
-# mismo PLC alimenta varias magnitudes de un activo en una sola lectura.
+# mismo PLC alimenta varias magnitudes de un activo en una sola lectura. Para que
+# el frontend reciba `telemetria` (las 5 magnitudes), mapea las 5 de la máquina.
 NODOS_POR_DEFECTO = [
     {"node": "ns=2;i=1001", "maquina": "Bomba de agua cruda", "campo": "vib"},
-    {"node": "ns=2;i=1002", "maquina": "Bomba de agua cruda", "campo": "temperatura"},
-    {"node": "ns=2;i=1003", "maquina": "Bomba de agua cruda", "campo": "rpm"},
-    {"node": "ns=2;i=1004", "maquina": "Bomba de agua cruda", "campo": "corriente"},
+    {"node": "ns=2;i=1002", "maquina": "Bomba de agua cruda", "campo": "temp"},
+    {"node": "ns=2;i=1003", "maquina": "Bomba de agua cruda", "campo": "pres"},
+    {"node": "ns=2;i=1004", "maquina": "Bomba de agua cruda", "campo": "rpm"},
+    {"node": "ns=2;i=1005", "maquina": "Bomba de agua cruda", "campo": "caudal"},
+    {"node": "ns=2;i=1006", "maquina": "Bomba de agua cruda", "campo": "corriente"},
     {"node": "ns=2;i=2001", "maquina": "Compresor de aire #2", "campo": "vib"},
 ]
 

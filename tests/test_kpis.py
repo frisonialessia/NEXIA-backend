@@ -29,7 +29,17 @@ def test_oee():
     assert kpis.oee(None, 0.9, 0.9) is None
 
 
-def test_desde_valores():
+def test_desde_valores_energia():
     out = kpis.desde_valores({"vib": 2.0, "corriente": 10.0, "voltaje": 400.0})
     assert "energiaKw" in out
-    assert kpis.desde_valores({"vib": 2.0}) == {}  # sin corriente → sin KPI
+
+
+def test_desde_valores_eficiencia_y_oee_con_caudal():
+    out = kpis.desde_valores({"caudal": 90.0})
+    assert out["eficiencia"] == kpis.eficiencia(90.0, kpis.CAUDAL_NOMINAL)
+    assert "oee" in out
+
+
+def test_desde_valores_vacio_sin_datos():
+    # Sin corriente ni caudal no hay nada que derivar.
+    assert kpis.desde_valores({"vib": 2.0}) == {}
