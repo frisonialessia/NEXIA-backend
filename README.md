@@ -8,18 +8,25 @@ se reemplaza el motor por la ingesta real y el contrato no cambia.
 
 ## Endpoints
 
-| Método | Ruta | Descripción |
-|--------|------|-------------|
-| `GET`  | `/v1/fleet/snapshot` | Estado completo de la planta (REST) |
-| `WS`   | `/v1/fleet/live` | Snapshot inicial + actualizaciones cada 2 s |
-| `POST` | `/v1/alerts/{id}/label` | Etiqueta una alerta `{ "veredicto": "real" \| "falsa" \| "nc" }` |
-| `POST` | `/v1/machines/{id}/repair` | Marca una máquina como reparada |
-| `POST` | `/v1/machines` | Alta de máquina (cuerpo = semilla) |
-| `PATCH`| `/v1/machines/{id}` | Edición parcial de máquina |
-| `DELETE`| `/v1/machines/{id}` | Baja de máquina |
+| Método | Ruta | Descripción | Permiso |
+|--------|------|-------------|---------|
+| `POST` | `/v1/auth/login` | `{ email, password }` → `{ token, usuario }` | público |
+| `GET`  | `/v1/auth/me` | Usuario del token Bearer | token |
+| `GET`  | `/v1/org/permisos` | Matriz de permisos de la organización | token |
+| `PUT`  | `/v1/org/permisos` | Editar la matriz (cuerpo `{ permisos }`) | `usuarios` |
+| `GET`  | `/v1/fleet/snapshot` | Estado completo de la planta (REST) | token |
+| `WS`   | `/v1/fleet/live?token=` | Snapshot inicial + actualizaciones cada 2 s | token |
+| `POST` | `/v1/alerts/{id}/label` | Etiqueta una alerta `{ "veredicto": "real" \| "falsa" \| "nc" }` | `auditar` |
+| `POST` | `/v1/machines/{id}/repair` | Marca una máquina como reparada | `mantenimiento` |
+| `POST` | `/v1/machines` | Alta de máquina (cuerpo = semilla) | `activos` |
+| `PATCH`| `/v1/machines/{id}` | Edición parcial de máquina | `activos` |
+| `DELETE`| `/v1/machines/{id}` | Baja de máquina | `activos` |
 
 Los comandos mutan el estado y reemiten un `snapshot` por el WebSocket; el
-frontend reconcilia automáticamente.
+frontend reconcilia automáticamente. Con `NEXIA_AUTH=1` se exige
+`Authorization: Bearer <token>` (y `?token=` en el WS) y cada comando requiere su
+permiso (ver **Auth y multi-tenant**). Con auth desactivada (default) todo queda
+abierto sobre una organización por defecto.
 
 Docs interactivas (OpenAPI) en `/docs`.
 
@@ -41,10 +48,13 @@ En el repo del frontend, crea `.env.local`:
 
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000
+# Login real contra el backend (FASE 2). Requiere arrancar el backend con
+# NEXIA_AUTH=1. Sin esta variable, el frontend usa su login local.
+NEXT_PUBLIC_AUTH=remote
 ```
 
-El frontend traerá el snapshot por REST y escuchará el WebSocket. Sin esa
-variable, el frontend corre 100 % simulado por su cuenta.
+El frontend traerá el snapshot por REST y escuchará el WebSocket. Sin
+`NEXT_PUBLIC_API_URL`, el frontend corre 100 % simulado por su cuenta.
 
 ## Despliegue
 
@@ -153,6 +163,59 @@ NEXIA_SOURCE=csv NEXIA_CSV_PATH=app/ingest/sample_readings_multi.csv uvicorn app
 NEXIA_SIM_MULTIVAR=0 uvicorn app.main:app --reload
 ```
 
+## Auth y multi-tenant (FASE 2)
+
+Login propio con **JWT Bearer** y aislamiento por **organización**. Se activa con
+`NEXIA_AUTH=1` (desactivado por defecto → modo demo abierto, idéntico a FASE 1).
+Sin dependencias nativas: el JWT (HS256) y el hash de contraseña (PBKDF2) usan
+solo la stdlib.
+
+**Login** (contrato que consume el frontend):
+
+```
+POST /v1/auth/login   { "email": "...", "password": "..." }
+→ { "token": "<jwt>", "usuario": { "nombre", "email", "rol", "color"? } }
+```
+
+Las llamadas autenticadas mandan `Authorization: Bearer <token>`; el WebSocket
+recibe el token por query param: `/v1/fleet/live?token=<jwt>`.
+
+**Roles:** `admin · jefe · tecnico · operador · lectura`. Cada organización tiene
+su **matriz de 11 permisos** (sembrada con defaults, editable por el admin vía
+`PUT /v1/org/permisos`). Permisos que gobiernan endpoints del backend:
+
+| Permiso | Roles (default) | Gobierna |
+|---|---|---|
+| `auditar` | admin, jefe, tecnico, operador | etiquetar alertas |
+| `mantenimiento` | admin, jefe, tecnico | reparar máquina |
+| `activos` | admin, tecnico | alta/edición/baja de máquinas |
+
+Los demás (`produccion, plantas, facturacion, conexiones, usuarios, ajustesPlanta,
+exportar, tendencia`) gobiernan vistas del frontend; el backend los sirve en
+`GET /v1/org/permisos` para que la UI se adapte.
+
+**Multi-tenant:** cada organización tiene su propio motor de planta y su flota; un
+usuario solo ve y opera la suya. El token lleva la organización y el backend
+enruta snapshot/comandos/WS a su *tenant*.
+
+**Persistencia:** en FASE 2a las orgs/usuarios están **sembrados en memoria** (2
+orgs de demo). La capa de datos está tras una interfaz (`app/auth/store.py`) para
+pasar a Postgres en FASE 2b sin tocar el resto.
+
+**Usuarios de demo** (contraseña `demo1234`):
+
+| Organización | Email | Rol |
+|---|---|---|
+| Planta Norte | alessia@planta.com | admin |
+| Planta Norte | carlos@planta.com | jefe |
+| Planta Norte | roberto@planta.com | tecnico |
+| Planta Norte | luis@planta.com | operador |
+| Planta Norte | audit@planta.com | lectura |
+| Aguas del Valle | admin@aguasdelvalle.com | admin |
+| Aguas del Valle | tecnico@aguasdelvalle.com | tecnico |
+
+Config: `NEXIA_AUTH`, `NEXIA_JWT_SECRET`, `NEXIA_JWT_TTL_H` (ver `.env.example`).
+
 ## Tests
 
 ```bash
@@ -163,7 +226,9 @@ pytest -q
 Cubren la `Lectura` multi-variable, el motor (filtrado/carry-forward, telemetría
 **solo-si-completa**, e **invariante de que la FSM no cambia** con o sin magnitudes
 extra), las **reglas de temperatura/presión** (edge-trigger), la retrocompatibilidad
-del contrato, los tres adaptadores y los KPIs.
+del contrato, los tres adaptadores y los KPIs. Y para FASE 2: login/tokens, hash de
+contraseña, la **matriz de roles**, el **aislamiento multi-tenant** y los endpoints
+de auth (Bearer requerido, permisos por comando, WS con `?token`).
 
 ## Estructura
 
@@ -176,6 +241,8 @@ app/
   simulation.py   motor: estado vivo, tick (sim), procesar_lectura (real), comandos
   kpis.py         KPIs derivados (energía/eficiencia/OEE), expuestos en MaquinaDTO.kpis
   hub.py          gestor de conexiones WebSocket
+  tenancy.py      multi-tenant: un motor + hub + lock por organización
+  auth/           login JWT (stdlib), matriz de roles, semilla de orgs/usuarios
   ingest/         módulo de ingesta (conectar fuentes reales)
 ```
 
@@ -185,7 +252,9 @@ app/
   no solo como reglas de umbral independientes).
 - OEE completo: disponibilidad (paradas) y calidad (scrap) con datos reales, en vez
   de los placeholders actuales.
-- **FASE 2:** persistencia (Postgres/Supabase), login `Authorization: Bearer` y
-  multi-tenant (filtrar por organización en REST y WebSocket).
+- **FASE 2a (hecho):** login `Authorization: Bearer` + multi-tenant (orgs/usuarios
+  sembrados en memoria, aislamiento en REST y WebSocket).
+- **FASE 2b:** persistencia en Postgres/Supabase (orgs, usuarios, máquinas, alertas,
+  historial, telemetría) detrás de la interfaz de repositorio ya preparada.
 - **FASE 3:** empaquetar `app/ingest/` como agente edge (Docker) dentro de la planta.
 - Adaptador Modbus TCP (usar `opcua_source.py` / `mqtt_source.py` como plantilla).

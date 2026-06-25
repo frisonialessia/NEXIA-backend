@@ -382,7 +382,10 @@ class FleetEngine:
     """Estado vivo de la planta + comandos. Toda mutación es síncrona; el broadcast
     al WebSocket lo orquesta main.py tras cada cambio."""
 
-    def __init__(self) -> None:
+    def __init__(self, flota_seed: Optional[list[dict]] = None) -> None:
+        # Semilla de flota POR TENANT: cada organización arranca con su propia
+        # flota. Sin argumento → FLOTA (la demo de siempre), para no romper nada.
+        self._flota_seed = flota_seed if flota_seed is not None else FLOTA
         self.flota: list[Maquina] = []
         self.alertas: list[dict] = []
         self.historial: list[dict] = []
@@ -393,7 +396,7 @@ class FleetEngine:
 
     # ── Arranque ────────────────────────────────────────────────────────────
     def _calentar(self) -> None:
-        self.flota = [crear_maquina(s) for s in FLOTA]
+        self.flota = [crear_maquina(s) for s in self._flota_seed]
         iniciales: list[dict] = []
         for _ in range(TICKS_CALENTAMIENTO):
             for m in self.flota:

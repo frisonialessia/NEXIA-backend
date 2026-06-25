@@ -13,6 +13,25 @@ Estado = Literal["STABLE", "WARNING_PROBATION", "CRITICAL_ALERT", "RECOVERY_PROB
 TipoMaquina = Literal["bomba", "compresor", "motor", "ventilador"]
 Escenario = Literal["sano", "degradando", "critico"]
 Veredicto = Literal["real", "falsa", "nc"]
+Rol = Literal["admin", "jefe", "tecnico", "operador", "lectura"]
+
+
+# ── Auth (login Bearer) ─────────────────────────────────────────────────────
+class UsuarioDTO(BaseModel):
+    nombre: str
+    email: str
+    rol: Rol
+    color: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    usuario: UsuarioDTO
 
 
 # ── Cuerpos de comandos ─────────────────────────────────────────────────────
