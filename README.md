@@ -78,8 +78,9 @@ NEXIA_SOURCE=csv uvicorn app.main:app --reload
 ```
 
 **Cómo encaja:** cualquier fuente normaliza sus datos a una `Lectura`
-(`maquina_id`, `vib` en mm/s, `ts` y `metricas` opcionales — ver multi-variable
-abajo) y los emite; el runner los mete al motor con `engine.ingest()` y difunde
+(`maquina_id`, `vib` en mm/s, `ts` y telemetría opcional `temp/pres/rpm/caudal/
+corriente` — ver multi-variable abajo) y los emite; el runner los mete al motor
+con `engine.ingest()` y difunde
 por el WebSocket. El motor no sabe de dónde vino el dato. Añadir Modbus/OPC UA/HTTP
 = escribir un `Source` nuevo y una rama en `crear_source()`. La **autenticación**
 y el **mapeo de campos** están marcados con `🔌` en cada adaptador (ver
@@ -99,28 +100,27 @@ app/ingest/
 ## Multi-variable (varias magnitudes por máquina)
 
 Una `Lectura` lleva la **vibración** (`vib`, el PIVOTE de detección) y, de forma
-**opcional**, otras magnitudes: los campos nombrados `temp`, `pres`, `rpm`,
-`caudal`, `corriente`, y/o un dict genérico `metricas` (`{clave: float}`) para el
-resto del vocabulario (p. ej. `voltaje`). El vocabulario canónico vive en un solo
-sitio, `app/constants.py` (`METRICAS` / `CAMPOS_TELEMETRIA`), con los **mismos
-nombres cortos que el frontend**; añadir una magnitud es una línea.
+**opcional**, las 5 magnitudes de telemetría: `temp`, `pres`, `rpm`, `caudal`,
+`corriente`. El vocabulario canónico vive en un solo sitio, `app/constants.py`
+(`METRICAS` / `CAMPOS_TELEMETRIA`), con los **mismos nombres cortos que el
+frontend**; añadir una magnitud es una línea.
 
 - **La detección de fallo no cambia.** La probabilidad y la FSM siguen pivotando
-  solo sobre `vib`. Las demás magnitudes son telemetría: se almacenan
-  (`Maquina.metricas`, carry-forward del último valor por magnitud) y se exponen.
-- **Dos vistas en el contrato (aditivas y opcionales):**
-  - `MaquinaDTO.metricas` — dict genérico y extensible (cualquier magnitud).
+  solo sobre `vib`. La telemetría se almacena (`Maquina.telemetria`, carry-forward
+  del último valor por magnitud) y se expone, pero no toca las alertas de vibración.
+- **En el contrato (aditivo y opcional):**
   - `MaquinaDTO.telemetria` — `TelemetriaDTO` **tipado** (las 5 magnitudes que
     grafica el frontend: temp/pres/rpm/caudal/corriente). Solo se emite cuando las
-    **5 están completas** (sus campos son floats no-nulos); si falta alguna → `null`.
+    **5 están completas** (sus campos son floats no-nulos); si falta alguna → `null`
+    (carry-forward la va completando).
   - `MaquinaDTO.kpis` — `KpisDTO` con energía/eficiencia/OEE derivados (ver abajo).
   - `AlertaDTO` gana `campo`/`valor`/`limite` (qué magnitud disparó y su límite).
-  - `LecturaDTO.m` — las magnitudes en cada punto del historial.
-- **No rompe el frontend.** Todo lo anterior es opcional; `vib`/`exp`/`v` y el
-  núcleo de las alertas no cambian. Con `NEXIA_SIM_MULTIVAR=0` el payload en vivo
-  es **idéntico** al de antes de multi-variable. Todo queda documentado en `/docs`.
-- **Adaptadores:** el CSV lee como métrica cualquier columna extra del vocabulario
-  (`sample_readings_multi.csv`); el MQTT toma las claves extra del payload JSON; el
+- **No rompe el frontend.** Todo lo anterior es opcional; `vib`/`exp`/`v`, el
+  historial `{t,v,exp}` y el núcleo de las alertas no cambian. Con
+  `NEXIA_SIM_MULTIVAR=0` el payload en vivo es **idéntico** al de antes de
+  multi-variable. Todo queda documentado en `/docs`.
+- **Adaptadores:** el CSV lee como telemetría las columnas del vocabulario
+  (`sample_readings_multi.csv`); el MQTT toma esas claves del payload JSON; el
   OPC UA **agrupa los nodos por máquina** (cada nodo mapea un `campo`) y emite
   **una** `Lectura` multi-variable por máquina y ciclo (`vib` + el resto).
 

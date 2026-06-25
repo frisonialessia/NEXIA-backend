@@ -40,23 +40,19 @@ class MaquinaPatchDTO(BaseModel):
 
 
 # ── Modelos de salida (solo para documentación en /docs) ────────────────────
-# NOTA multi-variable: los campos `metricas` / `m` son ADITIVOS y OPCIONALES.
-# Solo aparecen con valor cuando la fuente aporta magnitudes extra (temperatura,
-# presión, rpm, corriente…). En modo simulado por defecto van vacíos, así que el
-# contrato que ya consume el frontend no cambia: `vib`/`exp`/`v` siguen siendo el
-# eje. El frontend puede ignorarlos hasta que quiera graficarlos.
+# NOTA multi-variable: la telemetría (temp/pres/rpm/caudal/corriente) NO va en el
+# punto de historial, sino en `MaquinaDTO.telemetria` (último valor). El historial
+# sigue siendo EXACTAMENTE {t,v,exp} (lo que el frontend ya grafica), así el
+# contrato previo no cambia: `vib`/`exp`/`v` siguen siendo el eje.
 class LecturaDTO(BaseModel):
     t: int
     v: float
     exp: float
-    m: Optional[dict[str, float]] = None  # magnitudes extra en ese instante
 
 
-# Telemetría TIPADA (espejo EXACTO del frontend). Convive con el dict genérico
-# `metricas`: `metricas` es extensible (cualquier magnitud del vocabulario);
-# `telemetria` es la vista fija que el frontend grafica. Solo se emite cuando las
-# 5 magnitudes están presentes (por eso son floats no-nulos aquí, pero el campo
-# `MaquinaDTO.telemetria` es opcional).
+# Telemetría TIPADA (espejo EXACTO del frontend): las 5 magnitudes que la UI
+# grafica. Solo se emite cuando las 5 están presentes (por eso son floats no-nulos
+# aquí), pero el campo `MaquinaDTO.telemetria` es opcional (None si faltan datos).
 class TelemetriaDTO(BaseModel):
     temp: float       # °C
     pres: float       # bar
@@ -89,9 +85,8 @@ class MaquinaDTO(BaseModel):
     hist: list[LecturaDTO]
     esc: Optional[Escenario] = None
     calib: Optional[int] = None
-    metricas: Optional[dict[str, float]] = None  # dict genérico: último valor por magnitud extra
-    telemetria: Optional[TelemetriaDTO] = None   # vista tipada (5 magnitudes), solo si completa
-    kpis: Optional[KpisDTO] = None               # KPIs derivados (energía/eficiencia/OEE)
+    telemetria: Optional[TelemetriaDTO] = None  # 5 magnitudes, solo si están completas
+    kpis: Optional[KpisDTO] = None              # KPIs derivados (energía/eficiencia/OEE)
 
 
 class AlertaDTO(BaseModel):
@@ -106,7 +101,6 @@ class AlertaDTO(BaseModel):
     exp: float
     umbral: float
     estado: Optional[Literal["Pendiente", "Resuelto"]] = None
-    metricas: Optional[dict[str, float]] = None  # magnitudes extra al detectar
     # Aditivos: qué magnitud disparó la alerta y su valor/límite. `campo` es
     # "vibracion" | "temperatura" | "presion". Permiten al frontend distinguir
     # alertas de vibración de las de telemetría sin romper el contrato previo.

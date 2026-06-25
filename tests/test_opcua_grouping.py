@@ -66,7 +66,7 @@ def test_una_lectura_multivar_por_maquina(monkeypatch):
     assert len(cap) == 1
     assert cap[0].maquina_id == "A"
     assert cap[0].vib == 4.0
-    assert cap[0].metricas == {"temp": 60.0, "rpm": 1500.0}
+    assert cap[0].telemetria() == {"temp": 60.0, "rpm": 1500.0}
 
 
 def test_sin_vib_no_emite(monkeypatch):
@@ -85,7 +85,7 @@ def test_nodo_ilegible_se_omite_solo_esa_magnitud(monkeypatch):
     cap = _correr(src, _FakeClient({"v": 4.0, "t": RuntimeError("boom")}))
     assert len(cap) == 1
     assert cap[0].vib == 4.0
-    assert cap[0].metricas == {}  # temp ilegible se cae, la máquina igual emite
+    assert cap[0].telemetria() == {}  # temp ilegible se cae, la máquina igual emite
 
 
 def test_campo_fuera_de_vocabulario_se_ignora(monkeypatch):
@@ -96,4 +96,4 @@ def test_campo_fuera_de_vocabulario_se_ignora(monkeypatch):
     src = _src(monkeypatch, nodos)
     cap = _correr(src, _FakeClient({"v": 4.0, "x": 99.0}))
     assert len(cap) == 1
-    assert cap[0].metricas == {}
+    assert cap[0].telemetria() == {}

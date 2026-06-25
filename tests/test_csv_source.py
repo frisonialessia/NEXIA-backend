@@ -8,20 +8,21 @@ SAMPLE_MULTI = _INGEST / "sample_readings_multi.csv"
 
 
 def test_csv_3col_backcompat():
-    # El CSV de 3 columnas de siempre sigue funcionando, sin métricas extra.
+    # El CSV de 3 columnas de siempre sigue funcionando, sin telemetría.
     filas = CsvReplaySource(str(SAMPLE))._leer_filas()
     assert len(filas) > 0
-    assert all(l.metricas == {} for l in filas)
+    assert all(l.telemetria() == {} for l in filas)
     assert filas[0].vib > 0
 
 
-def test_csv_multivar_lee_metricas():
+def test_csv_multivar_lee_telemetria():
     filas = CsvReplaySource(str(SAMPLE_MULTI))._leer_filas()
     primera = filas[0]
     assert primera.maquina_id == "Bomba de agua cruda"
-    for clave in ("temp", "pres", "rpm", "caudal", "corriente", "voltaje"):
-        assert clave in primera.metricas
-    assert "vib" not in primera.metricas  # el pivote viaja en el campo vib
+    tele = primera.telemetria()
+    for clave in ("temp", "pres", "rpm", "caudal", "corriente"):
+        assert clave in tele
+    assert "vib" not in tele  # el pivote viaja en el campo vib
 
 
 def test_csv_columna_desconocida_se_ignora(tmp_path):
@@ -31,7 +32,7 @@ def test_csv_columna_desconocida_se_ignora(tmp_path):
         encoding="utf-8",
     )
     filas = CsvReplaySource(str(p))._leer_filas()
-    assert filas[0].metricas == {"temp": 50.0}
+    assert filas[0].telemetria() == {"temp": 50.0}
 
 
 def test_csv_celda_no_numerica_se_descarta(tmp_path):
@@ -41,4 +42,4 @@ def test_csv_celda_no_numerica_se_descarta(tmp_path):
         encoding="utf-8",
     )
     filas = CsvReplaySource(str(p))._leer_filas()
-    assert filas[0].metricas == {"rpm": 1500.0}
+    assert filas[0].telemetria() == {"rpm": 1500.0}

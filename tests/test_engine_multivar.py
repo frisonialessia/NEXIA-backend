@@ -7,41 +7,33 @@ def _maquina():
     return crear_maquina(SEED)  # calib=0 → evalúa de inmediato
 
 
-def test_ingest_almacena_metricas_filtradas():
+def test_ingest_almacena_telemetria_filtrada():
     eng = FleetEngine()
     eng.crear(SEED)
     eng.ingest("T-1", 2.1, None, {"temp": 55.0, "desconocida": 99, "vib": 9.9})
     m = eng._maquina("T-1")
-    assert m.metricas["temp"] == 55.0
-    assert "desconocida" not in m.metricas  # fuera del vocabulario canónico
-    assert "vib" not in m.metricas          # el pivote nunca va en metricas
+    assert m.telemetria.temp == 55.0
+    assert m.telemetria.presentes() == {"temp": 55.0}  # desconocida/vib descartadas
 
 
-def test_metricas_no_numericas_se_descartan():
+def test_telemetria_no_numerica_se_descarta():
     m = _maquina()
     procesar_lectura(m, 2.0, None, {"temp": "n/a", "rpm": "1500"})
-    assert "temp" not in m.metricas
-    assert m.metricas["rpm"] == 1500.0  # coacciona una str numérica
+    assert m.telemetria.temp is None
+    assert m.telemetria.rpm == 1500.0  # coacciona una str numérica
 
 
 def test_carry_forward_entre_lecturas():
     m = _maquina()
     procesar_lectura(m, 2.0, None, {"temp": 50.0})
     procesar_lectura(m, 2.1, None, {"rpm": 1500})
-    assert m.metricas == {"temp": 50.0, "rpm": 1500.0}
+    assert m.telemetria.presentes() == {"temp": 50.0, "rpm": 1500.0}
 
 
 def test_to_dto_omite_extras_si_vacio():
     dto = _maquina().to_dto()
-    assert "metricas" not in dto
     assert "telemetria" not in dto
     assert "kpis" not in dto
-
-
-def test_to_dto_incluye_metricas_si_presente():
-    m = _maquina()
-    procesar_lectura(m, 2.0, None, {"temp": 50.0})
-    assert m.to_dto()["metricas"]["temp"] == 50.0
 
 
 def test_telemetria_solo_si_completa():
@@ -63,30 +55,24 @@ def test_kpis_aparece_con_corriente_y_caudal():
     assert "energiaKw" in kpi and "eficiencia" in kpi and "oee" in kpi
 
 
-def test_hist_byte_shape_sin_metricas():
-    # Sin magnitudes extra, el punto de historial es EXACTAMENTE el de siempre.
+def test_hist_siempre_t_v_exp():
+    # El punto de historial es SIEMPRE {t,v,exp} (la telemetría va aparte).
     m = _maquina()
-    procesar_lectura(m, 2.0)
+    procesar_lectura(m, 2.0, None, {"temp": 60.0, "rpm": 1500})
     assert set(m.hist[-1].keys()) == {"t", "v", "exp"}
 
 
-def test_hist_incluye_m_con_metricas():
-    m = _maquina()
-    procesar_lectura(m, 2.0, None, {"rpm": 1500})
-    assert m.hist[-1]["m"]["rpm"] == 1500.0
-
-
-def test_fsm_no_cambia_con_metricas():
-    # Misma serie de vibración con y sin métricas (en rango) → MISMO camino de
+def test_fsm_no_cambia_con_telemetria():
+    # Misma serie de vibración con y sin telemetría (en rango) → MISMO camino de
     # estados: la telemetría no toca la detección de vibración.
     serie = [2.0, 8.0, 8.0, 8.0, 8.0, 8.0]
 
-    def correr(con_metricas):
+    def correr(con_tele):
         m = _maquina()
         out = []
         for v in serie:
-            metricas = {"temp": 60.0, "rpm": 1500} if con_metricas else None
-            procesar_lectura(m, v, None, metricas)
+            tele = {"temp": 60.0, "rpm": 1500} if con_tele else None
+            procesar_lectura(m, v, None, tele)
             out.append(m.estado)
         return out
 
@@ -108,7 +94,7 @@ def test_sim_telemetria_desactivable(monkeypatch):
     monkeypatch.setenv("NEXIA_SIM_MULTIVAR", "0")
     eng = FleetEngine()
     for m in eng.snapshot()["maquinas"]:
-        assert "metricas" not in m
         assert "telemetria" not in m
+        assert "kpis" not in m
         for p in m["hist"]:
             assert set(p.keys()) == {"t", "v", "exp"}

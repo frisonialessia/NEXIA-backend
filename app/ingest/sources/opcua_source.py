@@ -26,7 +26,7 @@ import asyncio
 import json
 import os
 
-from ...constants import CLAVES_METRICAS, METRICA_PIVOTE
+from ...constants import CAMPOS_TELEMETRIA, METRICA_PIVOTE
 from ..source import Lectura, Source
 
 # ── 🔌 MAPEO DE NODOS ───────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ from ..source import Lectura, Source
 # voltaje) son telemetría multi-variable.
 #
 # Por cada ciclo se leen TODOS los nodos, se AGRUPAN por máquina y se emite UNA
-# `Lectura` multi-variable por máquina (vib + el resto en `metricas`). Así un
+# `Lectura` multi-variable por máquina (vib + el resto como telemetría). Así un
 # mismo PLC alimenta varias magnitudes de un activo en una sola lectura. Para que
 # el frontend reciba `telemetria` (las 5 magnitudes), mapea las 5 de la máquina.
 NODOS_POR_DEFECTO = [
@@ -114,12 +114,12 @@ class OpcUaSource(Source):
 
     async def _leer_todos(self, client) -> None:
         """Lee todos los nodos de cada máquina y emite UNA Lectura multi-variable
-        por máquina: vibración (pivote) + el resto de magnitudes en `metricas`."""
+        por máquina: vibración (pivote) + el resto como telemetría."""
         for maquina, nodos in self._grupos.items():
             valores: dict[str, float] = {}
             for n in nodos:
                 campo = n.get("campo", METRICA_PIVOTE)
-                if campo not in CLAVES_METRICAS:
+                if campo != METRICA_PIVOTE and campo not in CAMPOS_TELEMETRIA:
                     continue  # magnitud fuera del vocabulario → se ignora
                 try:
                     valor = await client.get_node(n["node"]).read_value()
@@ -133,7 +133,8 @@ class OpcUaSource(Source):
                 # Sin vibración este ciclo: el motor pivota sobre vib, así que no
                 # se emite (la telemetría sin pivote es trabajo futuro).
                 continue
-            await self.emit(Lectura(maquina_id=maquina, vib=vib, metricas=valores))
+            # `valores` ya solo tiene campos de telemetría → kwargs de Lectura.
+            await self.emit(Lectura(maquina_id=maquina, vib=vib, **valores))
 
     async def stop(self) -> None:
         self._corriendo = False

@@ -20,13 +20,11 @@ CALIBRACION_TICKS = 6  # una máquina nueva aprende su baseline antes de alertar
 # almacenan y se exponen en el contrato, pero hoy NO alteran la detección. Son,
 # además, la base para KPIs futuros (OEE, eficiencia, energía → ver app/kpis.py).
 #
-# Añadir una magnitud nueva = una línea en METRICAS. Motor, adaptadores y KPIs
-# derivan todos de aquí (CLAVES_METRICAS / CLAVES_EXTRA / CAMPOS_TELEMETRIA).
+# Añadir una magnitud nueva = una línea en METRICAS + CAMPOS_TELEMETRIA. Motor,
+# adaptadores y KPIs derivan todos de aquí.
 #
-# Las CLAVES usan los MISMOS nombres cortos que el TelemetriaDTO del contrato
-# (espejo del frontend): temp, pres, rpm, caudal, corriente. Así el dict genérico
-# `metricas` y la `telemetria` tipada comparten vocabulario (no hay dos nombres
-# para la misma magnitud).
+# Las claves usan los MISMOS nombres cortos que el TelemetriaDTO del contrato
+# (espejo del frontend): temp, pres, rpm, caudal, corriente.
 METRICA_PIVOTE = "vib"
 
 METRICAS: dict[str, dict[str, str]] = {
@@ -36,22 +34,16 @@ METRICAS: dict[str, dict[str, str]] = {
     "rpm":       {"unidad": "rpm",  "label": "Velocidad"},
     "caudal":    {"unidad": "m³/h", "label": "Caudal"},
     "corriente": {"unidad": "A",    "label": "Corriente"},
-    "voltaje":   {"unidad": "V",    "label": "Voltaje"},
 }
 
-# Todas las claves válidas, y las EXTRA (todo menos el pivote, que viaja aparte).
-CLAVES_METRICAS = set(METRICAS)
-CLAVES_EXTRA = CLAVES_METRICAS - {METRICA_PIVOTE}
-
-# Las 5 magnitudes que componen el TelemetriaDTO del contrato (en ORDEN). 'voltaje'
-# queda fuera a propósito: solo se usa para estimar energía en kpis.py, no es
-# telemetría de cara al frontend.
+# Las 5 magnitudes (en ORDEN) que componen la telemetría = el TelemetriaDTO del
+# contrato. 'vib' (el pivote de detección) viaja aparte, en su propio campo.
 CAMPOS_TELEMETRIA = ("temp", "pres", "rpm", "caudal", "corriente")
 
 
 def es_metrica_valida(clave: str) -> bool:
-    """True si `clave` pertenece al vocabulario canónico de métricas."""
-    return clave in CLAVES_METRICAS
+    """True si `clave` pertenece al vocabulario canónico (vib + telemetría)."""
+    return clave in METRICAS
 
 
 def unidad(clave: str) -> str:

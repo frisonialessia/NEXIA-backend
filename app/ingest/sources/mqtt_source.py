@@ -23,7 +23,7 @@ import asyncio
 import json
 import os
 
-from ...constants import CLAVES_EXTRA
+from ...constants import CAMPOS_TELEMETRIA
 from ..source import Lectura, Source
 
 
@@ -63,16 +63,16 @@ class MqttSource(Source):
         if maquina_id == "" or vib is None:
             return None
 
-        # Magnitudes extra: solo las claves del vocabulario que vengan numéricas.
-        metricas: dict[str, float] = {}
-        for clave in CLAVES_EXTRA:
-            if clave in data:
+        # Magnitudes de telemetría: solo las del vocabulario que vengan numéricas.
+        tele: dict[str, float] = {}
+        for campo in CAMPOS_TELEMETRIA:
+            if campo in data:
                 try:
-                    metricas[clave] = float(data[clave])
+                    tele[campo] = float(data[campo])
                 except (TypeError, ValueError):
                     continue
 
-        return Lectura(maquina_id=maquina_id, vib=float(vib), ts=data.get("ts"), metricas=metricas)
+        return Lectura(maquina_id=maquina_id, vib=float(vib), ts=data.get("ts"), **tele)
 
     async def run(self) -> None:
         # Import perezoso: el repo corre sin paho-mqtt instalado.

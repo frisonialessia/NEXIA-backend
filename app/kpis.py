@@ -2,7 +2,7 @@
 # KPIs DERIVADOS  ·  energía, eficiencia, OEE
 # ──────────────────────────────────────────────────────────────────────────
 # Funciones PURAS que derivan indicadores a partir de las magnitudes que ya
-# trae una máquina multi-variable (ver Lectura.valores() / Maquina.metricas).
+# trae una máquina multi-variable (ver Lectura.valores() / Maquina.telemetria).
 #
 # ESTADO: deja "listo el camino". Hoy NO se exponen en el contrato (el frontend
 # no cambia). `desde_valores()` devuelve un dict camelCase pensado para poblar,
@@ -70,8 +70,8 @@ def oee(
 
 def desde_valores(valores: dict[str, float]) -> dict[str, float]:
     """Calcula los KPIs DERIVABLES con las magnitudes presentes en `valores`
-    (p. ej. {'vib','caudal','corriente','voltaje'}). Solo incluye los que se
-    pueden calcular con los datos disponibles — no inventa nada.
+    (p. ej. {'caudal','corriente'}). Si no hay 'voltaje' se usa el nominal. Solo
+    incluye los KPIs calculables con los datos disponibles — no inventa nada.
 
     Alimenta `MaquinaDTO.kpis` (claves camelCase). Capa aparte del motor: la FSM
     de vibración no depende de esto."""

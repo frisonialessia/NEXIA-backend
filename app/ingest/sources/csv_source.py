@@ -31,14 +31,13 @@ import asyncio
 import csv
 from typing import Optional
 
-from ...constants import CLAVES_EXTRA
+from ...constants import CAMPOS_TELEMETRIA
 from ..source import Lectura, Source
 
 # 🔌 Mapeo de campos: nombres de columna esperados en el CSV de origen.
 COL_MAQUINA = "maquina_id"
 COL_VIB = "vib"
 COL_TS = "ts"
-_COLS_BASE = {COL_MAQUINA, COL_VIB, COL_TS}
 
 
 class CsvReplaySource(Source):
@@ -60,7 +59,7 @@ class CsvReplaySource(Source):
                             maquina_id=row[COL_MAQUINA].strip(),
                             vib=float(row[COL_VIB]),
                             ts=int(ts_raw) if ts_raw else None,
-                            metricas=self._metricas_de(row),
+                            **self._telemetria_de(row),
                         )
                     )
                 except (KeyError, ValueError):
@@ -69,22 +68,20 @@ class CsvReplaySource(Source):
         return filas
 
     @staticmethod
-    def _metricas_de(row: dict) -> dict[str, float]:
-        """Extrae las columnas EXTRA del vocabulario canónico como métricas. Las
-        columnas base (maquina_id/vib/ts) y las desconocidas se ignoran; las
-        celdas vacías o no numéricas se descartan."""
-        metricas: dict[str, float] = {}
-        for col, val in row.items():
-            if col in _COLS_BASE or col not in CLAVES_EXTRA:
-                continue
-            val = (val or "").strip()
+    def _telemetria_de(row: dict) -> dict[str, float]:
+        """Extrae las columnas de telemetría del vocabulario (temp/pres/rpm/caudal/
+        corriente) como kwargs para `Lectura`. Las columnas desconocidas se
+        ignoran; las celdas vacías o no numéricas se descartan."""
+        tele: dict[str, float] = {}
+        for campo in CAMPOS_TELEMETRIA:
+            val = (row.get(campo) or "").strip()
             if not val:
                 continue
             try:
-                metricas[col] = float(val)
+                tele[campo] = float(val)
             except ValueError:
                 continue
-        return metricas
+        return tele
 
     async def run(self) -> None:
         self._corriendo = True

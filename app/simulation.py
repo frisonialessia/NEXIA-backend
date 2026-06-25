@@ -19,7 +19,6 @@ from .constants import (
     AHORRO_POR_PARADA,
     CALIBRACION_TICKS,
     CAMPOS_TELEMETRIA,
-    CLAVES_EXTRA,
     FLOTA,
     MAX_EVENTOS,
     PRES_MAX,
@@ -42,22 +41,46 @@ def _ahora_ms() -> int:
     return int(time.time() * 1000)
 
 
-def _metricas_limpias(metricas: Optional[dict]) -> dict[str, float]:
-    """Normaliza un dict de métricas EXTRA al vocabulario canónico: descarta el
-    pivote 'vib' (viaja aparte), las claves desconocidas y los valores no
-    numéricos, y coacciona el resto a float. Es la frontera de validación de la
-    telemetría multi-variable: el motor solo guarda magnitudes conocidas."""
-    if not metricas:
-        return {}
-    limpio: dict[str, float] = {}
-    for clave, valor in metricas.items():
-        if clave not in CLAVES_EXTRA:
-            continue
-        try:
-            limpio[clave] = float(valor)
-        except (TypeError, ValueError):
-            continue
-    return limpio
+@dataclass
+class Telemetria:
+    """Las 5 magnitudes de telemetría que acompañan a la vibración. Vive en el
+    estado de la máquina (`Maquina.telemetria`) con CARRY-FORWARD: cada lectura
+    actualiza solo lo que trae y conserva el último valor conocido del resto.
+    Es la única representación de telemetría (no hay dict genérico)."""
+
+    temp: Optional[float] = None
+    pres: Optional[float] = None
+    rpm: Optional[float] = None
+    caudal: Optional[float] = None
+    corriente: Optional[float] = None
+
+    def merge(self, datos: Optional[dict]) -> None:
+        """Funde (carry-forward) las magnitudes presentes y numéricas. Descarta
+        el pivote 'vib', las claves desconocidas y los valores no numéricos: es
+        la frontera de validación de la telemetría."""
+        if not datos:
+            return
+        for campo in CAMPOS_TELEMETRIA:
+            if campo not in datos or datos[campo] is None:
+                continue
+            try:
+                setattr(self, campo, float(datos[campo]))
+            except (TypeError, ValueError):
+                continue
+
+    def completa(self) -> bool:
+        """¿Están las 5 magnitudes? (requisito para exponer TelemetriaDTO)."""
+        return all(getattr(self, c) is not None for c in CAMPOS_TELEMETRIA)
+
+    def presentes(self) -> dict[str, float]:
+        """Magnitudes con valor, como ``{clave: float}`` (para KPIs/reglas)."""
+        return {c: getattr(self, c) for c in CAMPOS_TELEMETRIA if getattr(self, c) is not None}
+
+    def dto(self) -> Optional[dict]:
+        """TelemetriaDTO: las 5 magnitudes, SOLO si están completas; si no, None."""
+        if self.completa():
+            return {c: getattr(self, c) for c in CAMPOS_TELEMETRIA}
+        return None
 
 
 @dataclass
@@ -79,25 +102,14 @@ class Maquina:
     ritmo_dia: float = 0.0
     horas_op: float = 0.0
     calib: int = 0
-    metricas: dict = field(default_factory=dict)  # último valor por magnitud extra
+    telemetria: Telemetria = field(default_factory=Telemetria)  # carry-forward
     temp_alerta: bool = False  # edge-trigger: ¿ya se alertó por sobretemperatura?
     pres_alerta: bool = False  # edge-trigger: ¿ya se alertó por presión fuera de rango?
-
-    def telemetria_dto(self) -> Optional[dict]:
-        """Proyección TIPADA de la telemetría para el contrato (TelemetriaDTO).
-        Solo se devuelve cuando las 5 magnitudes están presentes (decisión:
-        'telemetria solo si completa'), porque el TelemetriaDTO del frontend las
-        declara como floats no-nulos. Mientras falte alguna → None (carry-forward
-        la irá completando). El simulador genera las 5, así que en sim va siempre
-        completa."""
-        if all(c in self.metricas for c in CAMPOS_TELEMETRIA):
-            return {c: self.metricas[c] for c in CAMPOS_TELEMETRIA}
-        return None
 
     def kpis_dto(self) -> Optional[dict]:
         """KPIs derivados (energía/eficiencia/OEE) calculables con la telemetría
         actual. None si no hay datos suficientes. Capa aparte: no toca la FSM."""
-        return kpis.desde_valores(dict(self.metricas)) or None
+        return kpis.desde_valores(self.telemetria.presentes()) or None
 
     def to_dto(self) -> dict:
         dto = {
@@ -116,12 +128,10 @@ class Maquina:
             "esc": self.esc,
             "calib": self.calib,
         }
-        # ADITIVOS: cada bloque solo se incluye cuando hay datos. En modo simulado
-        # con telemetría desactivada (NEXIA_SIM_MULTIVAR=0) ninguno aparece →
+        # ADITIVOS: cada bloque solo se incluye cuando hay datos. Con la telemetría
+        # del simulador desactivada (NEXIA_SIM_MULTIVAR=0) ninguno aparece →
         # payload idéntico al de antes de multi-variable.
-        if self.metricas:
-            dto["metricas"] = dict(self.metricas)   # dict genérico (extensible)
-        tele = self.telemetria_dto()
+        tele = self.telemetria.dto()
         if tele is not None:
             dto["telemetria"] = tele                # vista tipada (frontend)
         kpi = self.kpis_dto()
@@ -187,8 +197,6 @@ def _alerta_vibracion(m: Maquina, v: float, now_ms: int) -> dict:
         "valor": v,
         "limite": m.umbral,
     }
-    if m.metricas:
-        alerta["metricas"] = dict(m.metricas)
     return alerta
 
 
@@ -214,8 +222,6 @@ def _alerta_metrica(
         "valor": round(valor, 3),
         "limite": limite,
     }
-    if m.metricas:
-        alerta["metricas"] = dict(m.metricas)
     return alerta
 
 
@@ -226,7 +232,7 @@ def _reglas_telemetria(m: Maquina, v: float, now_ms: int) -> list[dict]:
     intervienen en la FSM de vibración."""
     alertas: list[dict] = []
 
-    temp = m.metricas.get("temp")
+    temp = m.telemetria.temp
     if temp is not None:
         if temp > UMBRAL_TEMP:
             if not m.temp_alerta:
@@ -239,7 +245,7 @@ def _reglas_telemetria(m: Maquina, v: float, now_ms: int) -> list[dict]:
         else:
             m.temp_alerta = False  # volvió al rango → rearma
 
-    pres = m.metricas.get("pres")
+    pres = m.telemetria.pres
     if pres is not None:
         fuera = pres < PRES_MIN or pres > PRES_MAX
         if fuera:
@@ -257,9 +263,9 @@ def _reglas_telemetria(m: Maquina, v: float, now_ms: int) -> list[dict]:
     return alertas
 
 
-def _evaluar(m: Maquina, v: float, now_ms: int, metricas: Optional[dict] = None) -> list[dict]:
+def _evaluar(m: Maquina, v: float, now_ms: int, telemetria: Optional[dict] = None) -> list[dict]:
     """EL MOTOR. Dada una lectura de vibración `v` (venga de donde venga) y, de
-    forma OPCIONAL, otras magnitudes (`metricas`: temp, pres, rpm, caudal,
+    forma OPCIONAL, otras magnitudes (`telemetria`: temp, pres, rpm, caudal,
     corriente…), aplica calibración, probabilidad de fallo y la FSM, y devuelve
     la LISTA de alertas generadas en este paso (vacía si ninguna): la de
     vibración al entrar en crítico, más las de telemetría (temp/presión).
@@ -269,19 +275,14 @@ def _evaluar(m: Maquina, v: float, now_ms: int, metricas: Optional[dict] = None)
     propias e independientes, y se exponen. NO sabe si el dato es real o simulado."""
     v = max(0.0, round(v, 3))
 
-    # Telemetría multi-variable: fusiona (carry-forward) las magnitudes extra
-    # conocidas en el estado de la máquina. No interviene en la FSM de vibración.
-    extra = _metricas_limpias(metricas)
-    if extra:
-        m.metricas.update(extra)
+    # Telemetría multi-variable: fusiona (carry-forward) las magnitudes presentes
+    # en el estado de la máquina. No interviene en la FSM de vibración.
+    m.telemetria.merge(telemetria)
 
     def _punto() -> dict:
-        # Punto de historial. Conserva exactamente {"t","v","exp"} (lo que el
-        # frontend ya consume) y añade "m" SOLO si hay magnitudes extra.
-        p = {"t": now_ms, "v": v, "exp": m.expected}
-        if m.metricas:
-            p["m"] = dict(m.metricas)
-        return p
+        # Punto de historial: EXACTAMENTE {"t","v","exp"} (lo que el frontend ya
+        # consume). La telemetría viaja aparte, en Maquina.telemetria.
+        return {"t": now_ms, "v": v, "exp": m.expected}
 
     # ── Calibración: aprendiendo baseline (sin juzgar, sin alertas) ──────────
     if m.calib > 0:
@@ -344,18 +345,18 @@ def tick_maquina(m: Maquina) -> list[dict]:
     alertas generadas en este paso (vacía si ninguna)."""
     _avanzar_baseline(m)
     v = _vibracion_simulada(m)
-    metricas = _telemetria_simulada(m, v) if _sim_multivar_activo() else None
-    return _evaluar(m, v, _ahora_ms(), metricas)
+    telemetria = _telemetria_simulada(m, v) if _sim_multivar_activo() else None
+    return _evaluar(m, v, _ahora_ms(), telemetria)
 
 
 def procesar_lectura(
-    m: Maquina, vib: float, ts: Optional[int] = None, metricas: Optional[dict] = None
+    m: Maquina, vib: float, ts: Optional[int] = None, telemetria: Optional[dict] = None
 ) -> list[dict]:
-    """Procesa una lectura REAL ya normalizada (vib en mm/s, más magnitudes extra
-    opcionales en `metricas`) que entra por el módulo de ingesta. Mismo motor que
-    la simulación, distinta fuente. Devuelve la lista de alertas generadas."""
+    """Procesa una lectura REAL ya normalizada (vib en mm/s, más magnitudes de
+    telemetría opcionales) que entra por el módulo de ingesta. Mismo motor que la
+    simulación, distinta fuente. Devuelve la lista de alertas generadas."""
     _avanzar_baseline(m)
-    return _evaluar(m, float(vib), ts or _ahora_ms(), metricas)
+    return _evaluar(m, float(vib), ts or _ahora_ms(), telemetria)
 
 
 def _evento_deteccion(a: dict) -> dict:
@@ -426,20 +427,20 @@ class FleetEngine:
         maquina_id: str,
         vib: float,
         ts: Optional[int] = None,
-        metricas: Optional[dict] = None,
+        telemetria: Optional[dict] = None,
     ) -> Optional[dict]:
         """Punto de entrada para una lectura real (la llama el módulo de ingesta,
-        ver app/ingest/). Procesa la lectura —vibración + magnitudes extra
-        opcionales (`metricas`)— con el MISMO motor que la simulación y devuelve
-        el parche 'update' para el WebSocket, o None si la máquina no existe. El
-        motor no sabe de qué fuente vino el dato."""
+        ver app/ingest/). Procesa la lectura —vibración + magnitudes de telemetría
+        opcionales— con el MISMO motor que la simulación y devuelve el parche
+        'update' para el WebSocket, o None si la máquina no existe. El motor no
+        sabe de qué fuente vino el dato."""
         m = self._maquina(maquina_id)
         if m is None:
             # Máquina desconocida. Para auto-registrar activos al vuelo, aquí se
             # podría crear con crear_maquina({...}); de momento se ignora.
             return None
 
-        alertas = procesar_lectura(m, vib, ts, metricas)
+        alertas = procesar_lectura(m, vib, ts, telemetria)
         if alertas:
             self.alertas = alertas + self.alertas
             self.historial = [_a_historial(a) for a in alertas] + self.historial

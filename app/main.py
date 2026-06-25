@@ -40,11 +40,13 @@ async def _bucle_motor() -> None:
 
 
 async def _on_lectura(lectura: Lectura) -> None:
-    """Modo INGESTA: puente fuente → motor. Mete la lectura real al motor (con sus
-    magnitudes extra, si las trae) y difunde el resultado por el WebSocket. Lo
-    invoca cada Source por cada dato."""
+    """Modo INGESTA: puente fuente → motor. Mete la lectura real al motor (con su
+    telemetría, si la trae) y difunde el resultado por el WebSocket. Lo invoca
+    cada Source por cada dato."""
     async with lock:
-        update = engine.ingest(lectura.maquina_id, lectura.vib, lectura.ts, lectura.metricas)
+        update = engine.ingest(
+            lectura.maquina_id, lectura.vib, lectura.ts, lectura.telemetria()
+        )
         if update:
             await hub.broadcast(update)
 

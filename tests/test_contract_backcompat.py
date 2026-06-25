@@ -26,7 +26,6 @@ def test_snapshot_valida_con_telemetria_parcial():
     eng.ingest("T-1", 2.0, None, {"temp": 50.0, "rpm": 1500})
     dto = SnapshotDTO.model_validate(eng.snapshot())  # no debe lanzar
     maq = next(m for m in dto.maquinas if m.id == "T-1")
-    assert maq.metricas == {"temp": 50.0, "rpm": 1500.0}
     assert maq.telemetria is None  # incompleta (2 de 5) → no se expone tipada
 
 

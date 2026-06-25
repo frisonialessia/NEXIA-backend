@@ -10,14 +10,14 @@ def test_solo_vib():
     l = _src()._normalizar("nexia/Bomba/vibracion", b'{"rms_mm_s": 4.2}')
     assert l is not None
     assert l.vib == 4.2
-    assert l.metricas == {}
+    assert l.telemetria() == {}
 
 
-def test_vib_mas_extra():
+def test_vib_mas_telemetria():
     payload = b'{"rms_mm_s": 4.2, "temp": 71.5, "rpm": 1480, "desconocida": 9}'
     l = _src()._normalizar("nexia/Bomba/vibracion", payload)
     assert l.vib == 4.2
-    assert l.metricas == {"temp": 71.5, "rpm": 1480.0}
+    assert l.telemetria() == {"temp": 71.5, "rpm": 1480.0}
 
 
 def test_maquina_id_desde_topic():
