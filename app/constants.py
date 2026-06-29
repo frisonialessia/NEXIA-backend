@@ -60,6 +60,34 @@ UMBRAL_TEMP = 80.0   # °C  — por encima: alerta de sobretemperatura
 PRES_MIN = 1.0       # bar — por debajo: alerta de presión baja
 PRES_MAX = 10.0      # bar — por encima: alerta de sobrepresión
 
+# ── Perfil por tipo de equipo (telemetría realista + umbrales por tipo) ──────
+# Valores BASE de máquina SANA (temp °C, pres bar, caudal m³/h, rpm nominal, kw de
+# potencia) y RANGOS de alerta por tipo. 'bomba' conserva los umbrales legacy
+# (= UMBRAL_TEMP / PRES_MIN / PRES_MAX) para no cambiar el comportamiento base.
+# Un compresor sano a 82 °C o un ventilador a 0.6 bar NO deben alarmar: por eso
+# los umbrales son por tipo.
+PERFIL_EQUIPO: dict[str, dict[str, float]] = {
+    "bomba":      {"temp": 54, "pres": 5.2, "caudal": 62, "rpm": 1480, "kw": 7.5,
+                   "temp_max": UMBRAL_TEMP, "pres_min": PRES_MIN, "pres_max": PRES_MAX},
+    "compresor":  {"temp": 82, "pres": 8.5, "caudal": 38, "rpm": 2950, "kw": 22,
+                   "temp_max": 98.0, "pres_min": 6.0, "pres_max": 11.0},
+    "motor":      {"temp": 63, "pres": 1.8, "caudal": 12, "rpm": 1460, "kw": 11,
+                   "temp_max": 90.0, "pres_min": 1.0, "pres_max": 3.5},
+    "ventilador": {"temp": 47, "pres": 0.6, "caudal": 88, "rpm": 950, "kw": 4,
+                   "temp_max": 70.0, "pres_min": 0.2, "pres_max": 1.2},
+}
+
+# Coste de parada por hora (€) por tipo, para el ROI (override por máquina posible).
+COSTO_PARADA_POR_TIPO: dict[str, float] = {
+    "bomba": 1500, "compresor": 2500, "motor": 2000, "ventilador": 900,
+}
+
+
+def perfil_de(tipo: str) -> dict:
+    """Perfil del tipo (base + umbrales). Default 'bomba' para tipos desconocidos."""
+    return PERFIL_EQUIPO.get(tipo, PERFIL_EQUIPO["bomba"])
+
+
 # ── Nominales para KPIs (OEE / eficiencia / energía) ─────────────────────────
 # Valores de diseño con los que se normalizan las magnitudes medidas. Son la
 # "base": el día que haya datos por máquina (placa, histórico) se parametrizan.

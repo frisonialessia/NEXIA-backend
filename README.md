@@ -140,8 +140,10 @@ Además de la FSM de vibración, hay reglas por umbral **edge-triggered** (una a
 al cruzar el umbral; se rearma al volver al rango), configurables en
 `app/constants.py`:
 
-- **Sobretemperatura:** `temp > UMBRAL_TEMP` (80 °C).
-- **Presión fuera de rango:** `pres < PRES_MIN` (1 bar) o `pres > PRES_MAX` (10 bar).
+- **Sobretemperatura:** `temp` supera el máximo del **perfil del tipo**
+  (`PERFIL_EQUIPO`): bomba 80 °C, motor 90, compresor 98, ventilador 70.
+- **Presión fuera de rango:** `pres` fuera del rango del tipo (p. ej. ventilador
+  0.2–1.2 bar, compresor 6–11). Así un compresor sano a 82 °C no alarma en falso.
 
 Cada una emite una `AlertaDTO` normal (mismo formato que la de vibración) con
 `campo` = `"temperatura"` | `"presion"` y su `valor`/`limite`.
@@ -161,7 +163,15 @@ datos presentes; es una capa aparte que **no toca la FSM**.
 NEXIA_SOURCE=csv NEXIA_CSV_PATH=app/ingest/sample_readings_multi.csv uvicorn app.main:app --reload
 # El simulador genera telemetría por defecto; para apagarla (payload "clásico"):
 NEXIA_SIM_MULTIVAR=0 uvicorn app.main:app --reload
+# Demo con ROI sembrado (no arranca en 0): siembra etiquetas de ejemplo 'real':
+NEXIA_DEMO=1 uvicorn app.main:app --reload
 ```
+
+La telemetría simulada es **realista por tipo** (`PERFIL_EQUIPO`): valores base de
+máquina sana (compresor 82 °C/8.5 bar, ventilador 0.6 bar, bomba 54 °C…) que **bajo
+fallo** suben temp/corriente y bajan rpm/caudal. Con `NEXIA_DEMO=1` el ROI real
+calcula ~$24k **desde** un par de etiquetas de ejemplo confirmadas (el frontend las
+marca como 'ejemplo' vía `NEXT_PUBLIC_DEMO`).
 
 ## Auth y multi-tenant (FASE 2)
 

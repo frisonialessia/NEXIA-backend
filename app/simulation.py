@@ -19,15 +19,14 @@ from .constants import (
     CALIBRACION_TICKS,
     CAMPOS_TELEMETRIA,
     COSTO_HORA_PARADA,
+    COSTO_PARADA_POR_TIPO,
     FLOTA,
     HORAS_PARADA_TIPICA,
     MAX_EVENTOS,
-    PRES_MAX,
-    PRES_MIN,
     TICKS_CALENTAMIENTO,
     UMBRAL_CRITICO,
-    UMBRAL_TEMP,
     VENTANA_HIST,
+    perfil_de,
     tipo_de,
 )
 from .engine import causa_principal, es_alta, probabilidad_fallo, transicion
@@ -242,30 +241,30 @@ def _reglas_telemetria(m: Maquina, v: float, now_ms: int) -> list[dict]:
     se repite cada tick mientras siga fuera, y se rearma al volver al rango. NO
     intervienen en la FSM de vibración."""
     alertas: list[dict] = []
+    p = perfil_de(m.tipo)  # umbrales POR TIPO (un compresor a 82 °C no alarma)
 
     temp = m.telemetria.temp
     if temp is not None:
-        if temp > UMBRAL_TEMP:
+        if temp > p["temp_max"]:
             if not m.temp_alerta:
                 m.temp_alerta = True
                 alertas.append(_alerta_metrica(
                     m, v, now_ms, "temperatura",
-                    f"Sobretemperatura: {temp} °C supera el umbral de {UMBRAL_TEMP} °C",
-                    valor=temp, limite=UMBRAL_TEMP,
+                    f"Sobretemperatura: {temp} °C supera el umbral de {p['temp_max']} °C",
+                    valor=temp, limite=p["temp_max"],
                 ))
         else:
             m.temp_alerta = False  # volvió al rango → rearma
 
     pres = m.telemetria.pres
     if pres is not None:
-        fuera = pres < PRES_MIN or pres > PRES_MAX
-        if fuera:
+        if pres < p["pres_min"] or pres > p["pres_max"]:
             if not m.pres_alerta:
                 m.pres_alerta = True
-                limite = PRES_MIN if pres < PRES_MIN else PRES_MAX
+                limite = p["pres_min"] if pres < p["pres_min"] else p["pres_max"]
                 alertas.append(_alerta_metrica(
                     m, v, now_ms, "presion",
-                    f"Presión fuera de rango: {pres} bar (rango {PRES_MIN}–{PRES_MAX} bar)",
+                    f"Presión fuera de rango: {pres} bar (rango {p['pres_min']}–{p['pres_max']} bar)",
                     valor=pres, limite=limite,
                 ))
         else:
@@ -335,19 +334,30 @@ def _sim_multivar_activo() -> bool:
 
 
 def _telemetria_simulada(m: Maquina, v: float) -> dict[str, float]:
-    """Telemetría de DEMO: las 5 magnitudes del TelemetriaDTO, plausibles y
-    correladas con la vibración, para que el frontend vea multi-variable EN VIVO
-    sin hardware. Se mantiene en rangos normales (no dispara las reglas de
-    temp/presión). En ingesta real las magnitudes llegan del PLC y esta función
-    no se usa."""
-    desv = max(0.0, v - m.expected)  # cuánto se desvía de lo esperado
+    """Telemetría de DEMO realista POR TIPO de equipo. Parte de los valores base de
+    máquina SANA (perfil del tipo) y los degrada con la severidad del fallo (cuánto
+    supera la vibración a lo esperado): suben temp y corriente, bajan rpm y caudal;
+    la presión se mantiene en torno a su base. En ingesta real las magnitudes llegan
+    del PLC y esta función no se usa."""
+    p = perfil_de(m.tipo)
+    sev = max(0.0, min((v - m.expected) / 5.0, 1.0))  # 0 sano … 1 fallo severo
+
+    def ruido(amplitud: float) -> float:
+        return (random.random() - 0.5) * amplitud
+
     return {
-        "temp": round(45 + desv * 3 + (random.random() - 0.5) * 2, 1),
-        "pres": round(4.0 + (random.random() - 0.5) * 0.3, 2),
-        "rpm": float(round(1480 - desv * 20 + (random.random() - 0.5) * 10)),
-        "caudal": round(max(0.0, 98 - desv * 4 + (random.random() - 0.5) * 2), 1),
-        "corriente": round(12 + desv * 0.8 + (random.random() - 0.5) * 0.5, 2),
+        "temp": round(p["temp"] + sev * 25 + ruido(1.5), 1),
+        "pres": round(p["pres"] + ruido(0.15), 2),
+        "rpm": float(round(p["rpm"] * (1 - sev * 0.12) + ruido(8))),
+        "caudal": round(max(0.0, p["caudal"] * (1 - sev * 0.30) + ruido(2)), 1),
+        "corriente": round(p["kw"] * 1.8 * (1 + sev * 0.40) + ruido(0.4), 2),  # ≈ kW × 1.8
     }
+
+
+def _demo_activo() -> bool:
+    """¿Sembrar el libro de etiquetas de ejemplo para un ROI creíble en demo?
+    NEXIA_DEMO=1 lo activa (apagado por defecto → arranque honesto en 0)."""
+    return os.getenv("NEXIA_DEMO", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def tick_maquina(m: Maquina) -> list[dict]:
@@ -406,6 +416,8 @@ class FleetEngine:
         self.savings = {"ahorroMes": 0.0, "paradasEvitadas": 0}
         self.registro = {"real": 0, "falsa": 0, "nc": 0}
         self._calentar()
+        if _demo_activo():
+            self._sembrar_demo()
 
     # ── Arranque ────────────────────────────────────────────────────────────
     def _calentar(self) -> None:
@@ -418,6 +430,39 @@ class FleetEngine:
         self.alertas = iniciales
         self.historial = [_a_historial(a) for a in iniciales]
         self.eventos = [_evento_deteccion(a) for a in iniciales]
+
+    def _sembrar_demo(self) -> None:
+        """MODO DEMO: asigna coste de parada por tipo a la flota y siembra el LIBRO
+        con alertas YA confirmadas (2 'real' + 1 'falsa') para que el ROI REAL
+        calcule un ahorro creíble (~$24k) DESDE esas etiquetas de ejemplo. No son
+        números inventados: el ahorro se DERIVA de las etiquetas. El frontend las
+        marca como 'ejemplo' (NEXT_PUBLIC_DEMO)."""
+        for m in self.flota:
+            if m.costo_parada_hora is None:
+                m.costo_parada_hora = COSTO_PARADA_POR_TIPO.get(m.tipo, COSTO_HORA_PARADA)
+        bombas = [m for m in self.flota if m.tipo == "bomba"]
+        reales = (bombas or self.flota)[:2]
+        falsas = [m for m in self.flota if m not in reales][:1]
+        ahora = _ahora_ms()
+
+        def _alerta_ejemplo(m, idx, veredicto, prob, margen):
+            pico = round(m.umbral + margen, 2)
+            return {
+                "id": f"demo-{veredicto}-{idx}", "maquina": m.id, "sensor": m.sensor,
+                "tipo": m.tipo, "prob": prob, "ts": ahora - (idx + 1) * 86_400_000,
+                "causa": "Vibración fuera del rango esperado: posible "
+                + causa_principal(m.tipo).lower(),
+                "vib": pico, "exp": m.expected, "umbral": m.umbral,
+                "campo": "vibracion", "valor": pico, "limite": m.umbral,
+                "estado": "Resuelto", "veredicto": veredicto,
+                "ahorro": m.costo_parada_hora_efectivo() * HORAS_PARADA_TIPICA
+                if veredicto == "real" else 0.0,
+            }
+
+        libro = [_alerta_ejemplo(m, i, "real", 0.84, 1.4) for i, m in enumerate(reales)]
+        libro += [_alerta_ejemplo(m, j, "falsa", 0.63, 0.8) for j, m in enumerate(falsas)]
+        self.historial = libro + self.historial
+        self._recalcular_roi()
 
     # ── Tick periódico ───────────────────────────────────────────────────────
     def step(self) -> dict:

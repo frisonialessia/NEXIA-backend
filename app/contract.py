@@ -123,6 +123,7 @@ class AlertaDTO(BaseModel):
     exp: float
     umbral: float
     estado: Optional[Literal["Pendiente", "Resuelto"]] = None
+    veredicto: Optional[Veredicto] = None  # etiqueta del operador (real|falsa|nc), si se resolvió
     # Aditivos: qué magnitud disparó la alerta y su valor/límite. `campo` es
     # "vibracion" | "temperatura" | "presion". Permiten al frontend distinguir
     # alertas de vibración de las de telemetría sin romper el contrato previo.
