@@ -38,6 +38,12 @@ def _secret() -> bytes:
     return os.getenv("NEXIA_JWT_SECRET", _SECRETO_DEV).encode("utf-8")
 
 
+def usando_secreto_inseguro() -> bool:
+    """True si NO hay un NEXIA_JWT_SECRET propio (vacío o el valor de desarrollo).
+    El arranque lo usa para fallar rápido si se activa la auth sin secreto en prod."""
+    return os.getenv("NEXIA_JWT_SECRET", "").strip() in ("", _SECRETO_DEV)
+
+
 def _ttl_segundos() -> int:
     return int(float(os.getenv("NEXIA_JWT_TTL_H", "12")) * 3600)
 

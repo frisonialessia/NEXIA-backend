@@ -43,7 +43,7 @@ from .auth.models import Usuario
 from .auth.passwords import verify_password
 from .auth.roles import PERMISOS, ROLES, matriz_a_json
 from .auth.seed import cargar_store
-from .auth.tokens import crear_token
+from .auth.tokens import crear_token, usando_secreto_inseguro
 from .constants import INTERVALO_S
 from .contract import (
     ComandoEtiquetar,
@@ -89,6 +89,13 @@ def _hacer_on_lectura(registry: TenantRegistry):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Seguridad (fail-fast): en producción (auth activa) exige un secreto JWT propio
+    # o NO arranca. Evita firmar tokens con el secreto de desarrollo por descuido.
+    if auth_activo() and usando_secreto_inseguro():
+        raise RuntimeError(
+            "NEXIA_AUTH=1 pero NEXIA_JWT_SECRET no está configurado (o usa el valor de "
+            "desarrollo). Define un secreto propio y fuerte para arrancar con auth."
+        )
     # Auth + tenants (en memoria, sembrados). En FASE 2b el store vendrá de la BD.
     app.state.auth_store = cargar_store()
     app.state.registry = TenantRegistry(app.state.auth_store)
