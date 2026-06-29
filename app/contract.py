@@ -47,6 +47,7 @@ class MaquinaSeedDTO(BaseModel):
     esc: Escenario = "sano"
     tipo: Optional[TipoMaquina] = None
     umbral: Optional[float] = None
+    costoParadaHora: Optional[float] = None  # € / hora de parada (alimenta el ROI)
 
 
 class MaquinaPatchDTO(BaseModel):
@@ -56,6 +57,7 @@ class MaquinaPatchDTO(BaseModel):
     esc: Optional[Escenario] = None
     tipo: Optional[TipoMaquina] = None
     umbral: Optional[float] = None
+    costoParadaHora: Optional[float] = None
 
 
 # ── Modelos de salida (solo para documentación en /docs) ────────────────────
@@ -104,6 +106,7 @@ class MaquinaDTO(BaseModel):
     hist: list[LecturaDTO]
     esc: Optional[Escenario] = None
     calib: Optional[int] = None
+    costoParadaHora: Optional[float] = None     # € / hora de parada (efectivo: máquina o nominal)
     telemetria: Optional[TelemetriaDTO] = None  # 5 magnitudes, solo si están completas
     kpis: Optional[KpisDTO] = None              # KPIs derivados (energía/eficiencia/OEE)
 

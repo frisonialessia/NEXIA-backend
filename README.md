@@ -260,7 +260,11 @@ app/
 - **Persistencia local (hecho, opcional, $0):** SQLite local activable por entorno
   (`NEXIA_SQLITE_PATH`), aditiva y desactivada por defecto. Sobrevive reinicios sin
   coste ni servicios.
-- **Más adelante (si se necesita escala):** mover la persistencia a Postgres
-  gestionado y ROI real calculado desde las etiquetas persistidas.
+- **ROI real (hecho):** `savings`/`registro` arrancan en CERO y se calculan desde
+  las etiquetas reales (no semillas). El ahorro usa `costoParadaHora` por máquina
+  (que el frontend ya maneja) o el nominal de planta. Campo aditivo en
+  `MaquinaSeedDTO`/`MaquinaPatchDTO`/`MaquinaDTO`.
+- **Más adelante (si se necesita escala):** persistencia gestionada (Postgres) y
+  ventana temporal del ahorro (un "este mes" real, no acumulado).
 - **FASE 3:** empaquetar `app/ingest/` como agente edge (Docker) dentro de la planta.
 - Adaptador Modbus TCP (usar `opcua_source.py` / `mqtt_source.py` como plantilla).

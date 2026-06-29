@@ -16,10 +16,11 @@ from typing import Optional
 
 from . import kpis
 from .constants import (
-    AHORRO_POR_PARADA,
     CALIBRACION_TICKS,
     CAMPOS_TELEMETRIA,
+    COSTO_HORA_PARADA,
     FLOTA,
+    HORAS_PARADA_TIPICA,
     MAX_EVENTOS,
     PRES_MAX,
     PRES_MIN,
@@ -102,6 +103,7 @@ class Maquina:
     ritmo_dia: float = 0.0
     horas_op: float = 0.0
     calib: int = 0
+    costo_parada_hora: Optional[float] = None  # € / hora de parada (override por máquina)
     telemetria: Telemetria = field(default_factory=Telemetria)  # carry-forward
     temp_alerta: bool = False  # edge-trigger: ¿ya se alertó por sobretemperatura?
     pres_alerta: bool = False  # edge-trigger: ¿ya se alertó por presión fuera de rango?
@@ -110,6 +112,11 @@ class Maquina:
         """KPIs derivados (energía/eficiencia/OEE) calculables con la telemetría
         actual. None si no hay datos suficientes. Capa aparte: no toca la FSM."""
         return kpis.desde_valores(self.telemetria.presentes()) or None
+
+    def costo_parada_hora_efectivo(self) -> float:
+        """€/hora de parada de ESTA máquina, o el nominal de planta si no se fijó.
+        Alimenta el ROI real (ahorro al confirmar una alerta como 'real')."""
+        return self.costo_parada_hora if self.costo_parada_hora is not None else COSTO_HORA_PARADA
 
     def to_dto(self) -> dict:
         dto = {
@@ -127,6 +134,7 @@ class Maquina:
             "hist": self.hist,
             "esc": self.esc,
             "calib": self.calib,
+            "costoParadaHora": self.costo_parada_hora_efectivo(),
         }
         # ADITIVOS: cada bloque solo se incluye cuando hay datos. Con la telemetría
         # del simulador desactivada (NEXIA_SIM_MULTIVAR=0) ninguno aparece →
@@ -155,6 +163,9 @@ def crear_maquina(seed: dict) -> Maquina:
         ritmo_dia=0.7 if esc == "degradando" else 0.0,
         horas_op=float(int(2000 + random.random() * 3000)),
         calib=0,
+        costo_parada_hora=(
+            float(seed["costoParadaHora"]) if seed.get("costoParadaHora") is not None else None
+        ),
     )
 
 
@@ -390,8 +401,10 @@ class FleetEngine:
         self.alertas: list[dict] = []
         self.historial: list[dict] = []
         self.eventos: list[dict] = []
-        self.savings = {"ahorroMes": 2 * AHORRO_POR_PARADA, "paradasEvitadas": 2}
-        self.registro = {"real": 23, "falsa": 4, "nc": 3}
+        # ROI REAL: arrancan en CERO y se calculan desde las etiquetas reales (ver
+        # etiquetar). Sin semillas → los números no son "de demo".
+        self.savings = {"ahorroMes": 0.0, "paradasEvitadas": 0}
+        self.registro = {"real": 0, "falsa": 0, "nc": 0}
         self._calentar()
 
     # ── Arranque ────────────────────────────────────────────────────────────
@@ -477,8 +490,11 @@ class FleetEngine:
             {**h, "estado": "Resuelto"} if h["id"] == alerta_id else h for h in self.historial
         ]
         if alerta and veredicto == "real":
+            # ROI real: ahorro = coste/hora de parada de ESA máquina × horas típicas.
+            m = self._maquina(alerta.get("maquina"))
+            costo_hora = m.costo_parada_hora_efectivo() if m else COSTO_HORA_PARADA
             self.savings = {
-                "ahorroMes": self.savings["ahorroMes"] + AHORRO_POR_PARADA,
+                "ahorroMes": round(self.savings["ahorroMes"] + costo_hora * HORAS_PARADA_TIPICA, 2),
                 "paradasEvitadas": self.savings["paradasEvitadas"] + 1,
             }
         if veredicto in self.registro:
@@ -533,6 +549,8 @@ class FleetEngine:
         if parcial.get("esc") is not None:
             m.esc = parcial["esc"]
             m.ritmo_dia = 0.7 if parcial["esc"] == "degradando" else 0.0
+        if parcial.get("costoParadaHora") is not None:
+            m.costo_parada_hora = float(parcial["costoParadaHora"])
 
     def quitar(self, id_: str) -> None:
         self.flota = [m for m in self.flota if m.id != id_]
