@@ -198,9 +198,11 @@ exportar, tendencia`) gobiernan vistas del frontend; el backend los sirve en
 usuario solo ve y opera la suya. El token lleva la organización y el backend
 enruta snapshot/comandos/WS a su *tenant*.
 
-**Persistencia:** en FASE 2a las orgs/usuarios están **sembrados en memoria** (2
-orgs de demo). La capa de datos está tras una interfaz (`app/auth/store.py`) para
-pasar a Postgres en FASE 2b sin tocar el resto.
+**Persistencia (opcional, $0):** por defecto el estado vive en memoria (orgs/
+usuarios sembrados; 2 orgs de demo). Activando `NEXIA_SQLITE_PATH` (o
+`NEXIA_PERSIST=1`) el estado de cada organización se guarda en un fichero **SQLite
+local** y sobrevive reinicios — sin servicios ni coste. Es **aditivo**: con el flag
+apagado el comportamiento y el contrato son idénticos (ver `app/persistence.py`).
 
 **Usuarios de demo** (contraseña `demo1234`):
 
@@ -242,6 +244,7 @@ app/
   kpis.py         KPIs derivados (energía/eficiencia/OEE), expuestos en MaquinaDTO.kpis
   hub.py          gestor de conexiones WebSocket
   tenancy.py      multi-tenant: un motor + hub + lock por organización
+  persistence.py  persistencia local SQLite opcional ($0, aditiva, off por defecto)
   auth/           login JWT (stdlib), matriz de roles, semilla de orgs/usuarios
   ingest/         módulo de ingesta (conectar fuentes reales)
 ```
@@ -252,9 +255,12 @@ app/
   no solo como reglas de umbral independientes).
 - OEE completo: disponibilidad (paradas) y calidad (scrap) con datos reales, en vez
   de los placeholders actuales.
-- **FASE 2a (hecho):** login `Authorization: Bearer` + multi-tenant (orgs/usuarios
-  sembrados en memoria, aislamiento en REST y WebSocket).
-- **FASE 2b:** persistencia en Postgres/Supabase (orgs, usuarios, máquinas, alertas,
-  historial, telemetría) detrás de la interfaz de repositorio ya preparada.
+- **FASE 2a (hecho):** login `Authorization: Bearer` + multi-tenant + endurecido
+  de JWT (fail-fast sin secreto en prod), aislamiento en REST y WebSocket.
+- **Persistencia local (hecho, opcional, $0):** SQLite local activable por entorno
+  (`NEXIA_SQLITE_PATH`), aditiva y desactivada por defecto. Sobrevive reinicios sin
+  coste ni servicios.
+- **Más adelante (si se necesita escala):** mover la persistencia a Postgres
+  gestionado y ROI real calculado desde las etiquetas persistidas.
 - **FASE 3:** empaquetar `app/ingest/` como agente edge (Docker) dentro de la planta.
 - Adaptador Modbus TCP (usar `opcua_source.py` / `mqtt_source.py` como plantilla).

@@ -56,18 +56,29 @@ from .contract import (
 )
 from .ingest.runner import correr_ingesta, crear_source
 from .ingest.source import Lectura
+from .persistence import crear_persistencia, dump_engine, restaurar_engine
 from .tenancy import TenantRegistry
 
 
-async def _bucle_motor(registry: TenantRegistry) -> None:
+CHECKPOINT_CADA_TICKS = 5  # ~10 s con INTERVALO_S=2: cadencia de guardado a disco
+
+
+async def _bucle_motor(app: FastAPI) -> None:
     """Modo SIMULACIÓN: cada INTERVALO_S avanza la planta de CADA organización y
-    difunde su parche a los WebSocket de esa organización (su hub)."""
+    difunde su parche a los WebSocket de esa organización (su hub). Si la
+    persistencia está activa, hace checkpoint a disco cada CHECKPOINT_CADA_TICKS."""
+    registry: TenantRegistry = app.state.registry
+    ticks = 0
     while True:
         await asyncio.sleep(INTERVALO_S)
+        ticks += 1
+        checkpoint = ticks % CHECKPOINT_CADA_TICKS == 0
         for t in registry.all():
             async with t.lock:
                 update = t.engine.step()
                 await t.hub.broadcast(update)
+                if checkpoint:
+                    _persistir_tenant(app, t)
 
 
 def _hacer_on_lectura(registry: TenantRegistry):
@@ -96,14 +107,20 @@ async def lifespan(app: FastAPI):
             "NEXIA_AUTH=1 pero NEXIA_JWT_SECRET no está configurado (o usa el valor de "
             "desarrollo). Define un secreto propio y fuerte para arrancar con auth."
         )
-    # Auth + tenants (en memoria, sembrados). En FASE 2b el store vendrá de la BD.
+    # Auth + tenants (en memoria, sembrados).
     app.state.auth_store = cargar_store()
     app.state.registry = TenantRegistry(app.state.auth_store)
+
+    # Persistencia local OPCIONAL (SQLite, $0). Desactivada por defecto → estado en
+    # memoria como hasta ahora. Si está activa, restaura el estado guardado al arrancar.
+    app.state.persistencia = crear_persistencia()
+    if app.state.persistencia:
+        _restaurar_todo(app)
 
     # Fuente de datos según NEXIA_SOURCE: simulador interno o ingesta externa.
     source = crear_source()
     if source is None:
-        tarea = asyncio.create_task(_bucle_motor(app.state.registry))        # simulación
+        tarea = asyncio.create_task(_bucle_motor(app))                       # simulación
     else:
         tarea = asyncio.create_task(
             correr_ingesta(source, _hacer_on_lectura(app.state.registry))    # ingesta real
@@ -118,6 +135,10 @@ async def lifespan(app: FastAPI):
             await tarea
         except asyncio.CancelledError:
             pass
+        # Checkpoint final + cierre ordenado de la persistencia.
+        if app.state.persistencia:
+            _checkpoint_todo(app)
+            app.state.persistencia.close()
 
 
 app = FastAPI(title="NEXIA API", version="2.0.0", lifespan=lifespan)
@@ -136,6 +157,39 @@ app.add_middleware(
 
 async def _broadcast_snapshot(tenant) -> None:
     await tenant.hub.broadcast({"type": "snapshot", "data": tenant.engine.snapshot()})
+    _persistir_tenant(app, tenant)  # gated: no-op si la persistencia está desactivada
+
+
+def _persistir_tenant(app: FastAPI, tenant) -> None:
+    """Guarda el estado de un tenant (motor + matriz de permisos) si hay
+    persistencia activa. No-op en modo memoria (default)."""
+    persistencia = getattr(app.state, "persistencia", None)
+    if not persistencia:
+        return
+    org = app.state.auth_store.org(tenant.org_id)
+    record = {
+        "engine": dump_engine(tenant.engine),
+        "permisos": matriz_a_json(org.permisos) if org else {},
+    }
+    persistencia.guardar(tenant.org_id, record)
+
+
+def _restaurar_todo(app: FastAPI) -> None:
+    """Restaura el estado de cada tenant desde disco al arrancar (si existe)."""
+    for t in app.state.registry.all():
+        estado = app.state.persistencia.cargar(t.org_id)
+        if not estado:
+            continue
+        restaurar_engine(t.engine, estado.get("engine", {}))
+        org = app.state.auth_store.org(t.org_id)
+        permisos = estado.get("permisos")
+        if org is not None and isinstance(permisos, dict):
+            org.permisos = {p: {r for r in permisos.get(p, []) if r in ROLES} for p in PERMISOS}
+
+
+def _checkpoint_todo(app: FastAPI) -> None:
+    for t in app.state.registry.all():
+        _persistir_tenant(app, t)
 
 
 @app.get("/")
