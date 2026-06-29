@@ -482,23 +482,43 @@ class FleetEngine:
     def _maquina(self, id_: str) -> Optional[Maquina]:
         return next((m for m in self.flota if m.id == id_), None)
 
+    def _recalcular_roi(self) -> None:
+        """Deriva savings y registro del LIBRO de etiquetas (historial con
+        `veredicto`). El historial se persiste → el ROI es reproducible y consistente
+        tras reiniciar, e idempotente (re-etiquetar no duplica)."""
+        real = falsa = nc = 0
+        ahorro = 0.0
+        for h in self.historial:
+            v = h.get("veredicto")
+            if v == "real":
+                real += 1
+                ahorro += h.get("ahorro") or 0.0
+            elif v == "falsa":
+                falsa += 1
+            elif v == "nc":
+                nc += 1
+        self.registro = {"real": real, "falsa": falsa, "nc": nc}
+        self.savings = {"ahorroMes": round(ahorro, 2), "paradasEvitadas": real}
+
     # ── Comandos (mutan estado; main.py reemite snapshot por el WS) ───────────
     def etiquetar(self, alerta_id: str, veredicto: str) -> None:
         alerta = next((a for a in self.alertas if a["id"] == alerta_id), None)
         self.alertas = [a for a in self.alertas if a["id"] != alerta_id]
-        self.historial = [
-            {**h, "estado": "Resuelto"} if h["id"] == alerta_id else h for h in self.historial
-        ]
-        if alerta and veredicto == "real":
-            # ROI real: ahorro = coste/hora de parada de ESA máquina × horas típicas.
-            m = self._maquina(alerta.get("maquina"))
+        # Ahorro de ESTA etiqueta: coste/hora de parada de la máquina × horas
+        # típicas, solo si se confirma 'real'. Se sella en el libro (historial).
+        ahorro = 0.0
+        if veredicto == "real":
+            ref = alerta or next((h for h in self.historial if h["id"] == alerta_id), None)
+            m = self._maquina(ref.get("maquina")) if ref else None
             costo_hora = m.costo_parada_hora_efectivo() if m else COSTO_HORA_PARADA
-            self.savings = {
-                "ahorroMes": round(self.savings["ahorroMes"] + costo_hora * HORAS_PARADA_TIPICA, 2),
-                "paradasEvitadas": self.savings["paradasEvitadas"] + 1,
-            }
-        if veredicto in self.registro:
-            self.registro = {**self.registro, veredicto: self.registro[veredicto] + 1}
+            ahorro = costo_hora * HORAS_PARADA_TIPICA
+        self.historial = [
+            {**h, "estado": "Resuelto", "veredicto": veredicto, "ahorro": ahorro}
+            if h["id"] == alerta_id else h
+            for h in self.historial
+        ]
+        # ROI = proyección derivada del libro, no un contador suelto.
+        self._recalcular_roi()
         if alerta:
             self.eventos = ([_evento_resolucion(alerta, veredicto)] + self.eventos)[:MAX_EVENTOS]
 
